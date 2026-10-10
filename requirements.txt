@@ -3,3 +3,5 @@ opencv-python
 numpy
 pyttsx3
 imageio-ffmpeg
+scikit-learn
+openpyxl
