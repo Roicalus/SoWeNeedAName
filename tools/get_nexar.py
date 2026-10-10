@@ -1,21 +1,21 @@
-"""Скачать ролики аварий и почти-аварий из Nexar Dashcam Collision Prediction Dataset + разметку.
+"""Download crash and near-miss videos from the Nexar Dashcam Collision Prediction Dataset + labels.
 
-Датасет: https://huggingface.co/datasets/nexar-ai/nexar_collision_prediction
-1500 роликов по ~40 с, 1280x720, 30 к/с, в основном США (много плотного городского трафика, Нью-Йорк).
-У «positive» размечены момент аварии (time_of_event) и момент, когда опасность уже видна (time_of_alert).
+Dataset: https://huggingface.co/datasets/nexar-ai/nexar_collision_prediction
+1500 videos of ~40 s, 1280x720, 30 fps, mostly the US (much dense city traffic, New York).
+"positive" videos have the crash moment (time_of_event) and the moment the danger is visible
+(time_of_alert) labelled.
 
-Доступ закрыт соглашением (Nexar Dataset License 2025: только с указанием авторства, без продажи):
-  1. войти на huggingface.co и нажать «Agree and access» на странице датасета;
-  2. создать токен (Settings → Access Tokens, тип Read);
-  3. запустить:
+Access is gated by an agreement (Nexar Dataset License 2025: attribution, no resale):
+  1. sign in on huggingface.co and press "Agree and access" on the dataset page;
+  2. create a token (Settings -> Access Tokens, type Read);
+  3. run:
         HF_TOKEN=hf_... python tools/get_nexar.py --n 30
         HF_TOKEN=hf_... python tools/get_nexar.py --n 30 --scene urban --negative 10
 
-Результат: data/nexar/*.mp4 и data/nexar/labels.csv (формат evaluate.py: file,start,end,type).
-Опасный интервал — от time_of_alert до time_of_event. «negative» (обычная езда) попадают в папку
-без строк в labels.csv — evaluate.py считает их спокойными, любое предупреждение = ложное.
-Проверка:  python evaluate.py data/nexar --labels data/nexar/labels.csv
-           python debug_video.py data/nexar
+Output: data/nexar/*.mp4 and data/nexar/labels.csv (file,start,end,type).
+The danger interval is time_of_alert .. time_of_event. "negative" videos (normal driving) are saved
+without label rows - evaluate.py treats them as calm, any yellow/red alert = false.
+Check:  python evaluate.py data/nexar --labels data/nexar/labels.csv
 """
 import argparse
 import csv
@@ -34,7 +34,7 @@ def get(path, token):
         return urllib.request.urlopen(req, timeout=120)
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
-            sys.exit("Нет доступа: примите условия на странице датасета и проверьте HF_TOKEN.")
+            sys.exit("No access: accept the terms on the dataset page and check HF_TOKEN.")
         raise
 
 
@@ -57,18 +57,18 @@ def download(row, out, token):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Скачать ролики Nexar с авариями")
-    ap.add_argument("--n", type=int, default=30, help="сколько роликов с авариями/почти-авариями")
-    ap.add_argument("--negative", type=int, default=0, help="сколько роликов обычной езды (для ложных)")
-    ap.add_argument("--scene", help="фильтр по сцене, например urban")
-    ap.add_argument("--light", help="фильтр по освещению, например Normal или Night")
+    ap = argparse.ArgumentParser(description="Download Nexar crash videos")
+    ap.add_argument("--n", type=int, default=30, help="crash / near-miss videos")
+    ap.add_argument("--negative", type=int, default=0, help="normal driving videos (for false alarms)")
+    ap.add_argument("--scene", help="scene filter, e.g. urban")
+    ap.add_argument("--light", help="light filter, e.g. Normal or Night")
     ap.add_argument("--out", default="data/nexar")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
     token = os.environ.get("HF_TOKEN")
     if not token:
-        sys.exit("Нужен HF_TOKEN (см. начало файла).")
+        sys.exit("HF_TOKEN is required (see the top of this file).")
     os.makedirs(args.out, exist_ok=True)
 
     def pick(rows, n):
@@ -82,7 +82,7 @@ def main():
     rows = pick(metadata("positive", token), args.n)
     if args.negative:
         rows += pick(metadata("negative", token), args.negative)
-    print("Колонки разметки:", ", ".join(k for k in rows[0] if not k.startswith("_")) if rows else "-")
+    print("Label columns:", ", ".join(k for k in rows[0] if not k.startswith("_")) if rows else "-")
 
     labels = []
     for k, r in enumerate(rows, 1):
@@ -101,9 +101,9 @@ def main():
         w.writeheader()
         w.writerows(labels)
     with open(os.path.join(args.out, "SOURCE.txt"), "w", encoding="utf-8") as f:
-        f.write("Nexar Dashcam Collision Prediction Dataset — (c) 2025 Nexar Inc., Nexar Dataset License 2025.\n"
+        f.write("Nexar Dashcam Collision Prediction Dataset - (c) 2025 Nexar Inc., Nexar Dataset License 2025.\n"
                 "D. C. Moura, S. Zvitia, Nexar Collision Dataset, Hugging Face, 2025.\n")
-    print(f"\n{len(rows)} роликов в {args.out}, разметка: {path}")
+    print(f"\n{len(rows)} videos in {args.out}, labels: {path}")
 
 
 if __name__ == "__main__":

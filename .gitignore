@@ -19,3 +19,9 @@ cache/
 models/ufldv2_*.onnx
 models/yolo11s.onnx
 models/yolo11n_fp32.onnx
+logs/
+*.part
+cache_coco/
+data/reels/
+data/bdd_det/
+models/risk_features*.npz

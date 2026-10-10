@@ -1,8 +1,8 @@
-"""Лёгкий трекер в стиле ByteTrack: сопоставление по IoU в два этапа, только numpy.
+"""Light ByteTrack-style tracker: two-stage IoU matching, numpy only.
 
-1. Уверенные детекции сопоставляются с треками (положение треков предсказано по скорости).
-2. Неуверенные детекции добирают оставшиеся треки — так машина не теряется в тени или под дождём.
-3. Несопоставленные уверенные детекции начинают новые треки.
+1. Confident detections are matched to tracks (track positions predicted from their velocity).
+2. Weak detections pick up the remaining tracks - so a car is not lost in shadow or rain.
+3. Unmatched confident detections start new tracks.
 """
 import numpy as np
 
@@ -23,7 +23,7 @@ def iou_matrix(a, b):
 
 
 def greedy_match(iou, thr):
-    """Пары (трек, детекция) по убыванию IoU."""
+    """(track, detection) pairs in decreasing IoU order."""
     pairs = []
     if iou.size == 0:
         return pairs
@@ -40,15 +40,17 @@ def greedy_match(iou, thr):
 
 
 def group(cls):
-    """Машину могут то и дело путать с грузовиком — для трекинга это один класс."""
-    return 0 if cls in C.VEHICLE_CLASSES else 1
+    """A car is often confused with a truck - for tracking they are one class; people and bicycles apart."""
+    if cls in C.VEHICLE_CLASSES:
+        return 0
+    return 1 if cls == C.PERSON_CLASS else 2
 
 
 class Track:
     def __init__(self, tid, box, cls):
         self.id, self.cls = tid, cls
-        self.box = box.copy()     # текущее (предсказанное или наблюдённое) положение
-        self.obs = box.copy()     # последнее наблюдение
+        self.box = box.copy()     # current (predicted or observed) position
+        self.obs = box.copy()     # last observation
         self.vel = np.zeros(4)
         self.hits, self.missed = 1, 0
 
@@ -68,7 +70,7 @@ class Tracker:
         self.next_id = 1
 
     def update(self, dets):
-        """dets: массив N x 6 [x1, y1, x2, y2, уверенность, класс]. Возвращает [(box, cls, id)]."""
+        """dets: N x 6 array [x1, y1, x2, y2, confidence, class]. Returns [(box, cls, id)]."""
         for tr in self.tracks:
             tr.predict()
 

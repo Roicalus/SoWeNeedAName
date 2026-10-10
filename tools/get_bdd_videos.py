@@ -1,21 +1,22 @@
-"""Скачать N роликов BDD100K (40 с, 720p, Нью-Йорк / Сан-Франциско, день и ночь) без всего архива.
+"""Download N BDD100K videos (40 s, 720p, New York / San Francisco, day and night) without the whole archive.
 
-Официальный сервер BDD100K (dl.cv.ethz.ch) больше не отвечает. На Hugging Face лежит побайтовая копия
-архива bdd100k_videos.zip (1.8 ТБ), нарезанная на части по 100 ГиБ:
+The official BDD100K server (dl.cv.ethz.ch) no longer answers. Hugging Face has a byte-exact copy of
+bdd100k_videos.zip (1.8 TB) split into 100 GiB parts:
     https://huggingface.co/datasets/linxxx3/bdd100k_videos
-Ролики в архиве не сжаты (метод STORED) и идут подряд, поэтому по заголовкам zip можно пройти
-запросами по диапазону байт и вырезать только нужные файлы (~20 МБ каждый).
+Videos in the archive are not compressed (STORED) and lie one after another, so we walk the zip
+local headers with byte-range requests and cut out only the files we need (~20 MB each).
 
     python tools/get_bdd_videos.py --n 50
-    python tools/get_bdd_videos.py --n 50 --skip 200      # следующие ролики
+    python tools/get_bdd_videos.py --n 50 --skip 200      # the next videos
 
-Лицензия BDD100K — для исследований (см. https://github.com/bdd100k/bdd100k).
-Разметки опасностей у BDD нет: это «обычная» езда в плотном трафике — для подсчёта ложных
-срабатываний и средних по риску ситуаций (подрезания, плотная колонна, пешеходы).
+BDD100K licence: research use (see https://github.com/bdd100k/bdd100k).
+BDD has no danger labels: it is "normal" driving in dense traffic - used to count false alarms and
+medium-risk situations (cut-ins, dense queues, pedestrians).
 """
 import argparse
 import os
 import struct
+import time
 import urllib.request
 
 URL = ("https://huggingface.co/datasets/linxxx3/bdd100k_videos/resolve/main/"
@@ -23,13 +24,22 @@ URL = ("https://huggingface.co/datasets/linxxx3/bdd100k_videos/resolve/main/"
 
 
 def fetch(start, length):
+    """A byte range of the archive; connection resets and the HF limit (429) are retried with a pause."""
     req = urllib.request.Request(URL, headers={"Range": f"bytes={start}-{start + length - 1}"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return r.read()
+    for attempt in range(20):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                data = r.read()
+            if len(data) == length:
+                return data
+        except Exception as e:
+            print(f"  retry ({e})", flush=True)
+        time.sleep(min(60, 5 * (attempt + 1)))
+    raise SystemExit("could not download an archive range")
 
 
 def entries():
-    """Идём по локальным заголовкам zip: (имя, смещение данных, размер)."""
+    """Walk the zip local headers: (name, data offset, size)."""
     pos = 0
     while True:
         head = fetch(pos, 1024)
@@ -39,22 +49,22 @@ def entries():
         name = head[30:30 + nlen].decode()
         extra = head[30 + nlen:30 + nlen + elen]
         j = 0
-        while j + 4 <= len(extra):                     # zip64: настоящий размер в доп. поле
+        while j + 4 <= len(extra):                     # zip64: the real size is in the extra field
             hid, hs = struct.unpack("<HH", extra[j:j + 4])
             if hid == 1 and csize == 0xFFFFFFFF:
                 csize = struct.unpack("<Q", extra[j + 4 + 8:j + 4 + 16] if hs >= 16 else extra[j + 4:j + 12])[0]
             j += 4 + hs
         if flag & 8 or method != 0:
-            raise SystemExit(f"{name}: неожиданный формат (flag={flag}, method={method})")
+            raise SystemExit(f"{name}: unexpected format (flag={flag}, method={method})")
         data = pos + 30 + nlen + elen
         yield name, data, csize
         pos = data + csize
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Скачать часть роликов BDD100K")
+    ap = argparse.ArgumentParser(description="Download part of the BDD100K videos")
     ap.add_argument("--n", type=int, default=30)
-    ap.add_argument("--skip", type=int, default=0, help="пропустить первые N роликов")
+    ap.add_argument("--skip", type=int, default=0, help="skip the first N videos")
     ap.add_argument("--out", default="data/bdd")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -73,7 +83,7 @@ def main():
                     f.write(fetch(start + off, min(8 << 20, size - off)))
             os.replace(dst + ".part", dst)
         got += 1
-        print(f"[{got}/{args.n}] {os.path.basename(name)}  {size / 1e6:.0f} МБ", flush=True)
+        print(f"[{got}/{args.n}] {os.path.basename(name)}  {size / 1e6:.0f} MB", flush=True)
         if got >= args.n:
             break
 

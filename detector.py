@@ -1,8 +1,10 @@
-"""Детекция и трекинг: YOLO (ONNX Runtime, без PyTorch) + собственный трекер.
+"""Detection and tracking: YOLO (ONNX Runtime, no PyTorch at run time) + our own tracker.
 
-ONNX нужен, потому что Smart App Control в Windows блокирует библиотеки PyTorch.
-Бонус: тот же .onnx файл потом переносится на Raspberry Pi / чип регистратора.
+ONNX keeps the run-time small and portable: the same .onnx file runs on a laptop (CPU, CUDA,
+DirectML), on a Mac (CoreML) and on automotive SoCs / NPUs that import ONNX.
 """
+import os
+
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -13,26 +15,31 @@ from tracker import Tracker
 
 
 def providers():
-    """Ускорители по порядку предпочтения: CoreML (Mac, Neural Engine/GPU), CUDA, DirectML, затем CPU."""
+    """Accelerators by preference (config.ORT_ACCEL), then CPU."""
     avail = ort.get_available_providers()
-    return [p for p in ("CoreMLExecutionProvider", "CUDAExecutionProvider", "DmlExecutionProvider")
-            if p in avail and p in C.ORT_ACCEL] + ["CPUExecutionProvider"]
+    return [p for p in C.ORT_ACCEL if p in avail] + ["CPUExecutionProvider"]
+
+
+def default_model():
+    return C.MODEL if os.path.exists(C.MODEL) else C.MODEL_FALLBACK
 
 
 class Detector:
-    def __init__(self, model=C.MODEL):
+    def __init__(self, model=None):
+        model = model or default_model()
         so = ort.SessionOptions()
         so.intra_op_num_threads = C.ORT_THREADS
-        so.log_severity_level = 3                       # без предупреждений CoreML о разбиении графа
+        so.log_severity_level = 3                       # no CoreML/DirectML graph partitioning warnings
         self.sess = ort.InferenceSession(model, so, providers=providers())
+        self.model_name = os.path.basename(model)
         inp = self.sess.get_inputs()[0]
         self.input_name, self.size = inp.name, inp.shape[2]
         self.dtype = np.float16 if "float16" in inp.type else np.float32
-        self.classes = np.array(list(C.VEHICLE_CLASSES) + [C.PERSON_CLASS])
+        self.classes = np.array(list(C.VEHICLE_CLASSES) + [C.PERSON_CLASS, C.BICYCLE_CLASS])
         self.tracker = Tracker()
 
     def detect(self, frame):
-        """Возвращает массив N x 6: [x1, y1, x2, y2, уверенность, класс COCO] в пикселях кадра."""
+        """Returns an N x 6 array: [x1, y1, x2, y2, confidence, COCO class] in frame pixels."""
         h, w = frame.shape[:2]
         r = self.size / max(h, w)
         nw, nh = round(w * r), round(h * r)
@@ -56,10 +63,10 @@ class Detector:
         x2 = np.clip((cx + bw / 2 - dx) / r, 0, w)
         y2 = np.clip((cy + bh / 2 - dy) / r, 0, h)
 
-        groups = (cls == C.PERSON_CLASS).astype(np.int32)   # NMS отдельно для машин и для людей
+        groups = np.where(np.isin(cls, list(C.VEHICLE_CLASSES)), 0, np.where(cls == C.PERSON_CLASS, 1, 2))
         xywh = np.stack([x1, y1, x2 - x1, y2 - y1], 1)
-        idx = cv2.dnn.NMSBoxesBatched(xywh.tolist(), conf.tolist(), groups.tolist(),
-                                      C.TRACK_LOW_CONF, C.NMS_IOU)
+        idx = cv2.dnn.NMSBoxesBatched(xywh.tolist(), conf.tolist(), groups.astype(np.int32).tolist(),
+                                      C.TRACK_LOW_CONF, C.NMS_IOU)       # NMS separately per group
         idx = np.array(idx, dtype=int).reshape(-1)
         return np.stack([x1, y1, x2, y2, conf, cls], 1)[idx]
 
@@ -67,5 +74,5 @@ class Detector:
         return [Detection(box, cls, tid) for box, cls, tid in self.tracker.update(self.detect(frame))]
 
     def reset(self):
-        """Новый ролик — сбрасываем трекер."""
+        """New video: reset the tracker."""
         self.tracker = Tracker()

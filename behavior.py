@@ -1,16 +1,29 @@
-"""Анализ дорожной ситуации: из детекций и разметки кадра получаем угрозы и предупреждения.
+"""Road situation analysis: from detections, lane markings, crosswalks and own motion to threats and alerts.
 
-Модуль не знает ни про окно, ни про звук, поэтому его используют main.py, evaluate.py,
-debug_video.py и tools/replay.py.
+The module knows nothing about windows or sound, so it is shared by main.py, evaluate.py,
+debug_video.py, tools/replay.py and tools/train_risk.py.
 
-Каждая машина, пешеход, велосипед и мотоцикл в кадре получает:
-  u   — боковое положение в ширинах полосы: 0 — центр нашей полосы, ±1 — центр соседней.
-        По разметке (lanes.py), если она видна; иначе по геометрии рамки (смещение в ширинах машины
-        или в росте человека — не зависит от расстояния);
-  du  — скорость по u (полос в секунду), с поправкой на поворот своей машины;
-  TTC — время до столкновения по росту рамки, дистанция — по ширине (машина) или росту (человек).
-Из этого — угрозы: сближение в нашей полосе, подрезание, пересечение пути, встречная по нашей полосе,
-пешеход/двухколёсный на пути, авария (рамка «взлетает»), виляние машины впереди.
+Every car, pedestrian, bicycle and motorcycle in view gets:
+  u   - lateral position in lane widths: 0 = centre of our lane, +-1 = centre of the next lane.
+        From lane markings (lanes.py) when visible; otherwise from box geometry (offset in car
+        widths or in person heights - independent of distance);
+  du  - lateral speed in lanes per second, corrected for our own turning;
+  TTC - time to collision from box growth; distance from width (car) or height (person, side view).
+Threats derived from that:
+  closing / ttc  - car in our lane closing in fast;
+  hardbrake      - car ahead starts braking hard (growth rate jumps);
+  cutin          - car from the next lane moving into ours in front of us;
+  drift          - car slowly drifting towards our lane (attention);
+  crossing       - car seen from the side crossing our path;
+  wrongway       - oncoming car in our lane (needs visible markings);
+  ped            - pedestrian / two-wheeler on our path, heading into it, or suddenly appearing close;
+  ped_xwalk      - pedestrian at a crosswalk ahead (crosswalk.py);
+  vru_near       - pedestrian / cyclist close to the road edge ahead;
+  crash          - any car "takes off" (box jumps up and gets taller) - a collision in view;
+  weave          - car ahead oscillates in its lane;
+  close          - too close to the car ahead while closing in;
+  danger         - learned risk model (risk.py) says the scene looks like the seconds before a crash.
+Levels: 1 green (attention), 2 yellow (possible risk), 3 red (danger).
 """
 from __future__ import annotations
 
@@ -24,18 +37,20 @@ import numpy as np
 import config as C
 from lanes import LaneModel
 
-VRU_CLASSES = {C.PERSON_CLASS, 1, 3}          # человек, велосипед, мотоцикл — «уязвимые участники»
-# признаки ситуации для модели риска (risk.py); «near» = 1 / дистанция, «toward» — скорость к нашей полосе
-FEATURES = ["veh_in_near", "veh_in_ttc", "veh_side_toward", "veh_side_near", "veh_side_ttc", "veh_count_near",
-            "veh_lat_speed", "vru_in_near", "vru_side_toward", "vru_side_near", "crash", "oncoming", "weave",
-            "lanes_ok"]
+VRU_CLASSES = {C.PERSON_CLASS, C.BICYCLE_CLASS, 3}       # person, bicycle, motorcycle: vulnerable road users
+# scene features for the risk model (risk.py); "near" = 1 / distance, "toward" = speed towards our lane
+FEATURES = ["veh_in_near", "veh_in_ttc", "veh_in_rate", "veh_in_jerk", "veh_side_toward", "veh_side_near",
+            "veh_side_ttc", "veh_cross_near", "veh_count_near", "veh_lat_speed", "vru_in_near", "vru_side_toward",
+            "vru_side_near", "vru_new_near", "vru_count_near", "xwalk", "crash", "crash_rise", "oncoming", "weave",
+            "lanes_ok", "ego_speed", "ego_yaw", "n_tracks", "any_ttc"]
+_SKIP = object()      # "crosswalk not analysed on this step"
 
 
 @dataclass
 class Detection:
-    box: tuple   # x1, y1, x2, y2 в пикселях
+    box: tuple   # x1, y1, x2, y2 in pixels
     cls: int
-    tid: int     # id трека
+    tid: int     # track id
 
 
 @dataclass
@@ -49,13 +64,13 @@ class Alert:
 @dataclass
 class Threat:
     det: Detection
-    kind: str           # тип угрозы (ключ C.ALERTS)
-    level: int          # 1–3
-    u: float | None     # боковое положение, полос
-    du: float | None    # боковая скорость, полос/с
+    kind: str           # threat type (key of C.ALERTS)
+    level: int          # 1-3
+    u: float | None     # lateral position, lanes
+    du: float | None    # lateral speed, lanes/s
     ttc: float | None
     dist: float | None
-    path: tuple | None = None   # (x, y) куда машина будет через C.PREDICT_SEC — для стрелки на экране
+    path: tuple | None = None   # (x, y) where the object will be in C.PREDICT_SEC - for the on-screen arrow
 
 
 @dataclass
@@ -63,18 +78,20 @@ class FrameResult:
     alerts: list = field(default_factory=list)
     lead: Detection | None = None
     ttc: float | None = None
-    distance: float | None = None   # примерная дистанция до машины впереди, м
-    oncoming: bool = False          # машина впереди похожа на встречную
+    distance: float | None = None   # approximate distance to the car ahead, m
+    oncoming: bool = False          # the car ahead looks like an oncoming one
     peds: list = field(default_factory=list)
-    crashed: list = field(default_factory=list)    # машины с признаками аварии (любые, не только впереди)
-    threats: list = field(default_factory=list)    # Threat по всем участникам
-    lanes: LaneModel | None = None                 # разметка (для рисования), если видна
-    risk: float = 0.0                              # общий уровень опасности 0..1
-    features: dict = field(default_factory=dict)   # признаки ситуации для модели риска (risk.py)
-    # для отладки (debug_video.py): статус каждой рамки, сырые условия до подтверждения, метрики виляния
-    tracks: list = field(default_factory=list)   # [(Detection, статус)]
+    crashed: list = field(default_factory=list)    # cars with crash signs (any, not only ahead)
+    threats: list = field(default_factory=list)    # Threat for all objects
+    lanes: LaneModel | None = None                 # lane markings (for drawing) when visible
+    crosswalk: tuple | None = None                 # crosswalk box (frame fractions) when visible
+    ego_speed: float | None = None                 # m/s, when known
+    risk: float = 0.0                              # overall danger 0..1
+    features: dict = field(default_factory=dict)   # scene features for the risk model (risk.py)
+    # for debugging (debug_video.py): status of every box, raw conditions before confirmation, weave metrics
+    tracks: list = field(default_factory=list)     # [(Detection, status)]
     raw: set = field(default_factory=set)
-    weave: tuple | None = None                   # (амплитуда в ширинах, смен направления)
+    weave: tuple | None = None                     # (amplitude in widths, direction changes)
 
     @property
     def top(self):
@@ -85,22 +102,22 @@ class FrameResult:
         return self.top.level if self.top else 0
 
 
-# ---------- своя полоса без разметки: трапеция перед машиной ----------
+# ---------- own lane without markings: trapezoid in front of the car ----------
 def _half_width(y):
     k = (y - C.CORRIDOR_TOP_Y) / (1 - C.CORRIDOR_TOP_Y)
     return C.CORRIDOR_TOP_HALF + k * (C.CORRIDOR_BOTTOM_HALF - C.CORRIDOR_TOP_HALF)
 
 
 def in_corridor(x, y):
-    """x, y в долях кадра; y — нижний край рамки."""
+    """x, y as frame fractions; y is the bottom edge of the box."""
     return y >= C.CORRIDOR_TOP_Y and abs(x - C.CORRIDOR_CENTER_X) <= _half_width(y)
 
 
 def on_path(cx, width):
-    """Боковое смещение машины в её же ширинах: (cx - центр) / ширина = X / реальная_ширина.
+    """Lateral offset of a car in its own widths: (cx - centre) / width = X / real_width.
 
-    Не зависит от расстояния. Машина на нашей траектории — смещение < ~0.7,
-    припаркованная у обочины — 1.5 и больше (она быстро растёт в кадре, но мы её объезжаем).
+    Independent of distance. A car on our path has an offset < ~0.7,
+    a car parked at the kerb 1.5 and more (it grows fast in the frame, but we pass it).
     """
     return abs(cx - C.CORRIDOR_CENTER_X) / max(width, 1e-6) <= C.LEAD_MAX_OFFSET
 
@@ -113,32 +130,47 @@ def corridor_polygon(W, H):
 
 
 def focal():
-    """Фокусное расстояние в долях ширины кадра (по углу обзора камеры)."""
+    """Focal length as a fraction of frame width (from the camera field of view)."""
     return 0.5 / math.tan(math.radians(C.CAMERA_HFOV_DEG) / 2)
 
 
 class BehaviorEngine:
     def __init__(self):
-        # id трека -> [(t, x1, y1, x2, y2, u)]: рамка в долях кадра и боковое положение в полосах
+        # track id -> [(t, x1, y1, x2, y2, u)]: box as frame fractions and lateral position in lanes
         self.hist = defaultdict(deque)
         self.cls = {}
         self.last_seen = {}
-        self.since = {}                     # тип -> когда условие появилось
-        self.last_raw = {}                  # тип -> когда условие было последний раз
-        self.red_base = {}                  # обычная доля красного у машины (для стоп-сигналов)
-        self.crash_at = {}                  # id трека -> когда последний раз были признаки аварии
+        self.first_seen = {}
+        self.rates = defaultdict(deque)     # track id -> [(t, growth rate)] for hard-braking detection
+        self.since = {}                     # kind -> when the condition appeared
+        self.last_raw = {}                  # kind -> when the condition was last seen
+        self.red_base = {}                  # usual share of red pixels on a car (brake lights)
+        self.crash_at = {}                  # track id -> last time crash signs were seen
         self.lanes = LaneModel()
+        from crosswalk import CrosswalkModel
+        self.xwalk = CrosswalkModel()
         from risk import RiskModel
         self.risk = RiskModel()
-        self.yaw = deque()                  # (t, медианный сдвиг рамок по x) — поворот своей машины
+        self.yaw = deque()                  # (t, median box shift in x) - own turning
+        self.crash_rise = 0.0
 
-    # ================================================================ главный шаг
-    def update(self, t, W, H, detections, frame=None, lanes=None):
-        """t — время видео, с; frame — кадр (для стоп-сигналов); lanes — линии от LaneDetector.detect."""
+    # ================================================================ main step
+    def update(self, t, W, H, detections, frame=None, lanes=None, ego=None, crosswalk=_SKIP):
+        """t - video time, s; frame - image (brake lights); lanes - lines from LaneDetector.detect;
+        ego - (speed m/s, yaw frac/s, ok) from EgoMotion; crosswalk - crosswalk.detect() result
+        (box or None) when it was analysed on this step."""
         res = FrameResult()
         self.lanes.update(t, lanes)
         lanes_ok = self.lanes.valid()
         res.lanes = self.lanes if lanes_ok else None
+        if crosswalk is not _SKIP:
+            self.xwalk.update(t, crosswalk)
+        elif self.xwalk.box is not None and t - self.xwalk.seen > 1.0:
+            self.xwalk.box = None
+        res.crosswalk = self.xwalk.box
+        ego_ok = ego is not None and ego[2]
+        res.ego_speed = ego[0] if ego_ok else None
+        stopped = ego_ok and ego[0] < 1.0
         aspect = W / H
 
         live = []
@@ -146,7 +178,7 @@ class BehaviorEngine:
             x1, y1, x2, y2 = d.box
             if (y1 + y2) / 2 / H > C.HOOD_Y:
                 res.tracks.append((d, "hood"))
-                continue                     # капот своей машины
+                continue                     # our own hood
             if d.cls not in C.VEHICLE_CLASSES and d.cls not in VRU_CLASSES:
                 continue
             box = (x1 / W, y1 / H, x2 / W, y2 / H)
@@ -157,36 +189,46 @@ class BehaviorEngine:
                 h.popleft()
             self.cls[d.tid] = d.cls
             self.last_seen[d.tid] = t
+            self.first_seen.setdefault(d.tid, t)
             live.append(d)
         self._forget(t)
-        yaw = self._yaw_rate(t, live)
+        yaw = ego[1] if ego_ok else self._yaw_rate(t, live)
+        if ego_ok:
+            self._yaw_rate(t, live)          # keep the history consistent
 
         raw, threats, lead = set(), [], None
         F = dict.fromkeys(FEATURES, 0.0)
         F["lanes_ok"] = float(lanes_ok)
+        F["xwalk"] = float(res.crosswalk is not None)
+        F["ego_speed"] = ego[0] if ego_ok else -1.0
+        F["ego_yaw"] = abs(yaw)
+        F["n_tracks"] = float(len(live))
         for d in live:
             h = self.hist[d.tid]
             _, x1, y1, x2, y2, u = h[-1]
             w, by = x2 - x1, y2
             vehicle = d.cls in C.VEHICLE_CLASSES
-            side_view = (x2 - x1) * aspect > C.CROSS_MIN_ASPECT * (y2 - y1)     # машина видна сбоку
+            side_view = (x2 - x1) * aspect > C.CROSS_MIN_ASPECT * (y2 - y1)     # car seen from the side
             dist = self._distance(d.cls, x2 - x1, y2 - y1, aspect, side_view)
-            # TTC по ширине (точнее для машины сзади) или по высоте (не зависит от поворота — для машин
-            # сбоку и людей); у человека — чтобы понять, приближаемся ли мы к нему
+            # TTC from width (more precise for a car seen from behind) or from height (independent of
+            # turning - for side views and people); for people it tells whether we approach them
             ttc = self._ttc(h, t, by_height=side_view or not vehicle)
             du = self._lat_speed(h, t, yaw, lanes_ok, vehicle, aspect)
             inside = x1 > C.EDGE_MARGIN and x2 < 1 - C.EDGE_MARGIN
             ahead = by >= C.CORRIDOR_TOP_Y
             in_lane = u is not None and abs(u) <= C.IN_LANE and ahead
+            toward = -math.copysign(1, u) * du if (u is not None and du is not None and u != 0) else 0.0
+            age = t - self.first_seen[d.tid]
             status = f"u{u:+.1f}" if u is not None else "-"
             if du is not None and abs(du) >= 0.2:
                 status += f" {du:+.1f}/s"
 
             found = []
-            # --- признаки для модели риска: «насколько опасен самый опасный участник» по каждому аспекту
+            # --- features for the risk model: "how dangerous is the most dangerous object" per aspect
             if dist is not None and ahead:
                 near = 1 / max(dist, 1.0)
-                toward = -math.copysign(1, u) * du if (u is not None and du is not None) else 0.0
+                if ttc is not None and u is not None and abs(u) <= 1.5:
+                    F["any_ttc"] = max(F["any_ttc"], 1 / ttc)
                 if vehicle:
                     if in_lane and inside:
                         F["veh_in_near"] = max(F["veh_in_near"], near)
@@ -197,41 +239,66 @@ class BehaviorEngine:
                         F["veh_side_near"] = max(F["veh_side_near"], near)
                         if ttc is not None:
                             F["veh_side_ttc"] = max(F["veh_side_ttc"], 1 / ttc)
+                    if side_view and u is not None and abs(u) <= 2.0:
+                        F["veh_cross_near"] = max(F["veh_cross_near"], near)
                     F["veh_count_near"] += float(dist < 20)
                     F["veh_lat_speed"] = max(F["veh_lat_speed"], abs(du or 0) * near * 10)
                 else:
+                    F["vru_count_near"] += float(dist < 20)
                     if in_lane:
                         F["vru_in_near"] = max(F["vru_in_near"], near)
                     elif u is not None and abs(u) <= 2.5:
                         F["vru_side_toward"] = max(F["vru_side_toward"], toward * near * 10)
                         F["vru_side_near"] = max(F["vru_side_near"], near)
+                    if age <= C.VRU_SUDDEN_AGE:
+                        F["vru_new_near"] = max(F["vru_new_near"], near)
             if vehicle and in_lane and inside and (lead is None or y2 > self.hist[lead.tid][-1][4]):
                 lead = d
-            # --- подрезание / пересечение пути: машина сбоку быстро идёт в нашу полосу
+
+            # --- cut-in / crossing / drift: a car from the side moving into our lane
             if u is not None and du is not None and ahead and inside and not in_lane and abs(u) <= C.CUTIN_MAX_U:
-                toward = -math.copysign(1, u) * du                      # полос/с к нашей полосе
                 t_in = (abs(u) - C.IN_LANE) / toward if toward > 0 else None
-                # опасно, только если мы к нему приближаемся (TTC) или он уже рядом: на светофоре
-                # поперечный поток и перестроения далеко впереди — не угроза
+                # dangerous only if we approach it (TTC) or it is already close: at traffic lights the
+                # cross traffic and lane changes far ahead are not a threat
                 closing_in = (ttc is not None and ttc <= C.CUTIN_TTC) or (dist is not None and dist <= C.CRIT_DIST)
                 if vehicle and closing_in and dist <= C.CUTIN_MAX_DIST and toward >= C.CUTIN_MIN_SPEED \
                         and t_in is not None and t_in <= C.CUTIN_HORIZON:
-                    # видна сбоку (едет поперёк — перекрёсток, разворот) — «пересекает путь»; иначе перестроение
+                    # seen from the side (driving across - junction, U-turn): "crossing"; else a lane change
                     kind = "crossing" if side_view else "cutin"
                     found.append((kind, 3 if ttc is not None and ttc < C.CUTIN_CRIT_TTC else 2))
-                if not vehicle and closing_in and dist <= C.VRU_DIST and toward >= C.VRU_MIN_SPEED \
-                        and t_in is not None and t_in <= C.VRU_HORIZON:
-                    found.append(("ped", 3 if ttc is not None and ttc < C.CUTIN_CRIT_TTC else 2))
-            # --- пешеход / велосипед / мотоцикл на нашем пути
-            if not vehicle and in_lane and dist is not None and dist <= C.VRU_NEAR:
-                found.append(("ped", 3 if dist <= C.CRIT_DIST else 2))
-                res.peds.append(d)
-            # --- машина в нашей полосе быстро сближается
+                elif vehicle and not side_view and dist <= C.DRIFT_MAX_DIST and toward >= C.DRIFT_MIN_SPEED \
+                        and t_in is not None and t_in <= C.DRIFT_HORIZON and not stopped:
+                    found.append(("drift", 1))
+            # --- pedestrians and two-wheelers
+            if not vehicle and dist is not None and ahead:
+                lvl = 0
+                kind = "ped"
+                if in_lane and dist <= C.VRU_NEAR:                          # on our path
+                    lvl = 3 if dist <= C.CRIT_DIST else 2
+                elif u is not None and du is not None and not in_lane and toward >= C.VRU_MIN_SPEED:
+                    t_in = (abs(u) - C.IN_LANE) / toward
+                    closing_in = (ttc is not None and ttc <= C.CUTIN_TTC) or dist <= C.CRIT_DIST
+                    if closing_in and dist <= C.VRU_DIST and t_in <= C.VRU_HORIZON:   # stepping into our lane
+                        lvl = 3 if ttc is not None and ttc < C.CUTIN_CRIT_TTC else 2
+                if not lvl and age <= C.VRU_SUDDEN_AGE and dist <= C.VRU_SUDDEN_DIST \
+                        and u is not None and abs(u) <= C.VRU_SUDDEN_U:            # appeared suddenly close
+                    lvl = 2
+                if not lvl and C.CROSSWALK and self.xwalk.near((x1 + x2) / 2, by) and dist <= C.CROSSWALK_DIST:
+                    kind, lvl = "ped_xwalk", 1                                   # at a crosswalk ahead
+                if not lvl and u is not None and abs(u) <= C.VRU_EDGE_U and dist <= C.VRU_ATTENTION_DIST:
+                    kind, lvl = "vru_near", 1                                    # close to the road edge
+                if lvl and stopped and kind == "ped":
+                    lvl = 1                  # we stand still: people crossing in front are not a risk yet
+                if lvl:
+                    found.append((kind, lvl))
+                    if kind == "ped":
+                        res.peds.append(d)
+            # --- car in our lane closing in fast
             if vehicle and in_lane and inside and not side_view and ttc is not None and w >= C.TTC_MIN_WIDTH:
                 closing_ms = dist / ttc if dist else 0
                 if closing_ms > C.LEAD_MAX_CLOSING:
-                    # сближение быстрее ~43 км/ч: встречная. По разметке видно, что она в нашей полосе —
-                    # это опасность; без разметки (поворот, трапеция) — скорее ложная «машина впереди»
+                    # closing faster than ~43 km/h: oncoming. Lane markings show it is in our lane - danger;
+                    # without markings (curve, trapezoid) it is more likely a false "car ahead"
                     if lanes_ok and ttc < C.WRONGWAY_TTC:
                         found.append(("wrongway", 3))
                     elif d is lead:
@@ -245,7 +312,7 @@ class BehaviorEngine:
                 raw.add(kind)
             res.tracks.append((d, status + "".join(f" {k.upper()}" for k, _ in found)))
 
-        # --- авария у любой машины в кадре: держим тревогу CRASH_HOLD секунд, даже если трек потерян
+        # --- crash of any car in view: keep the alarm CRASH_HOLD seconds even if the track is lost
         for tid in self._crashes(t):
             self.crash_at[tid] = t
         self.crash_at = {k: v for k, v in self.crash_at.items() if t - v <= C.CRASH_HOLD}
@@ -254,43 +321,57 @@ class BehaviorEngine:
             res.crashed = [d for d in live if d.tid in self.crash_at]
             threats += [Threat(d, "crash", 3, None, None, None, None) for d in res.crashed]
 
-        # --- машина впереди: дистанция, TTC, «слишком близко», виляние, стоп-сигналы
+        # --- car ahead: distance, TTC, hard braking, "too close", weaving, brake lights
         if lead:
             res.lead = lead
             h = self.hist[lead.tid]
             w = h[-1][3] - h[-1][1]
             res.distance = self._distance(lead.cls, w, h[-1][4] - h[-1][2], aspect)
             res.ttc = None if res.oncoming else self._ttc(h, t)
-            if w * aspect > C.CROSS_MIN_ASPECT * (h[-1][4] - h[-1][2]):
-                res.ttc = None                       # впереди машина боком — её TTC по ширине неверен
-            # «слишком близко» — только если ещё и сближаемся: в пробке вплотную стоять нормально
+            side = w * aspect > C.CROSS_MIN_ASPECT * (h[-1][4] - h[-1][2])
+            if side:
+                res.ttc = None                       # side view ahead: TTC from width is wrong
+            rate, jerk = self._brake(lead.tid, h, t) if not side else (0.0, 0.0)
+            F["veh_in_rate"], F["veh_in_jerk"] = max(rate, 0.0), max(jerk, 0.0)
+            if not res.oncoming and res.distance is not None and res.distance <= C.BRAKE_MAX_DIST \
+                    and rate >= C.BRAKE_RATE and jerk >= C.BRAKE_JERK:
+                raw.add("hardbrake")
+                crit = res.ttc is not None and res.ttc < C.BRAKE_CRIT_TTC
+                threats.append(Threat(lead, "hardbrake", 3 if crit else 2, h[-1][5], None, res.ttc, res.distance))
+            # "too close" only if also closing in: standing bumper to bumper in a jam is fine
             if w >= C.CLOSE_WIDTH and res.ttc is not None and res.ttc < C.CLOSE_MAX_TTC:
                 raw.add("close")
                 threats.append(Threat(lead, "close", 1, h[-1][5], None, res.ttc, res.distance))
-            # по разметке виляние не считаем: её дрожание больше порога амплитуды (0.15 ширины машины)
+            # no weaving from lane markings: their jitter is above the amplitude threshold
             weaving, res.weave = self._weaving(h, t, stats=True)
             if weaving:
                 raw.add("weave")
                 threats.append(Threat(lead, "weave", 2, h[-1][5], None, res.ttc, res.distance))
             if C.BRAKE_LIGHTS and frame is not None and self._brake_lights(frame, lead):
                 raw.add("brakelight")
+                threats.append(Threat(lead, "brakelight", 1, h[-1][5], None, res.ttc, res.distance))
 
         F["crash"] = float(bool(self.crash_at))
+        F["crash_rise"] = self.crash_rise
         F["oncoming"] = float(res.oncoming or "wrongway" in raw)
         F["weave"] = float("weave" in raw)
         res.features = F
-        p = self.risk(t, F)                  # обученная модель (risk.py): похоже ли на предаварийную ситуацию
+        p = self.risk(t, F)                  # learned model (risk.py): does this look like the seconds before a crash
         if p is not None and p >= self.risk.threshold:
             raw.add("danger")
+            lvl = 3 if p >= self.risk.threshold_red else 2
+            target = lead or (max(live, key=lambda d: d.box[3]) if live else None)
+            if target is not None:
+                threats.append(Threat(target, "danger", lvl, None, None, None, None))
         res.raw, res.threats = raw, threats
         res.alerts = self._confirm(t, raw, threats)
         res.risk = p if p is not None else max((th.level for th in threats), default=0) / 3
         return res
 
-    # ================================================================ подтверждение
+    # ================================================================ confirmation
     def _confirm(self, t, raw, threats):
-        """Условие должно продержаться CONFIRM_SEC (защита от шума), но короткие провалы до RAW_GAP
-        не сбрасывают его — так тревога не мигает и не запаздывает из-за одного пропущенного кадра."""
+        """A condition must hold CONFIRM_SEC (noise protection), but short dropouts up to RAW_GAP do not
+        reset it - so the alarm neither flickers nor lags because of one missed frame."""
         for kind in raw:
             self.since.setdefault(kind, t)
             self.last_raw[kind] = t
@@ -300,17 +381,19 @@ class BehaviorEngine:
         active = {k for k in self.since
                   if t - self.last_raw[k] <= C.ALERT_HOLD and self.last_raw[k] - self.since[k] >= C.CONFIRM_SEC[k]}
         if "ttc" in active:
-            active.discard("closing")   # критическое заменяет обычное сближение
+            active.discard("closing")   # critical replaces ordinary closing
+        if "cutin" in active:
+            active.discard("drift")
         alerts = []
         for k in active:
-            level, screen, voice = C.ALERTS[k]
-            level = max([level] + [th.level for th in threats if th.kind == k])
-            alerts.append(Alert(k, level, screen, voice))
+            base, screen, voice = C.ALERTS[k]
+            levels = [th.level for th in threats if th.kind == k]
+            alerts.append(Alert(k, max(levels) if levels else base, screen, voice))
         return alerts
 
-    # ================================================================ геометрия
+    # ================================================================ geometry
     def _lateral(self, cls, box, aspect, lanes_ok):
-        """Боковое положение в ширинах полосы: 0 — центр нашей полосы, ±1 — соседняя."""
+        """Lateral position in lane widths: 0 = centre of our lane, +-1 = next lane."""
         x1, y1, x2, y2 = box
         cx = (x1 + x2) / 2
         if lanes_ok:
@@ -321,13 +404,13 @@ class BehaviorEngine:
             return None
         if cls in C.VEHICLE_CLASSES:
             meters = (cx - C.CORRIDOR_CENTER_X) / max(x2 - x1, 1e-6) * C.VEHICLE_WIDTH_M
-        else:   # смещение в метрах по росту человека (у велосипеда/мотоцикла — по высоте рамки)
+        else:   # offset in metres from person height (bicycle/motorcycle: box height)
             meters = (cx - C.CORRIDOR_CENTER_X) * aspect / max(y2 - y1, 1e-6) * C.PERSON_HEIGHT_M
         return meters / C.LANE_WIDTH_M
 
     def _distance(self, cls, w, h, aspect, side_view=False):
-        """Дистанция, м: по ширине машины сзади; у машины сбоку ширина рамки — это её длина,
-        поэтому по высоте; у людей и двухколёсных — по росту."""
+        """Distance, m: from the width of a car seen from behind; for a side view the box width is the
+        car length, so use height; for people and two-wheelers - height."""
         if cls in C.VEHICLE_CLASSES and cls != 3:
             if not side_view:
                 return C.VEHICLE_WIDTH_M * focal() / max(w, 1e-6)
@@ -336,7 +419,7 @@ class BehaviorEngine:
         return C.PERSON_HEIGHT_M * focal() * aspect / max(h, 1e-6)
 
     def _yaw_rate(self, t, live):
-        """Поворот своей машины: все рамки разом сдвигаются по x. Медиана скорости сдвига, доли кадра/с."""
+        """Own turning: all boxes shift in x together. Median shift speed, frame fractions/s."""
         speeds = []
         for d in live:
             h = self.hist[d.tid]
@@ -349,8 +432,8 @@ class BehaviorEngine:
         return float(np.mean([v for _, v in self.yaw]))
 
     def _lat_speed(self, h, t, yaw, lanes_ok, vehicle, aspect):
-        """du/dt, полос/с. По разметке — напрямую (она поворачивается вместе с кадром);
-        без разметки — из сдвига рамки за вычетом поворота своей машины и «разъезда» перспективы."""
+        """du/dt, lanes/s. From markings - directly (they turn in the frame together with the cars);
+        without markings - from the box shift minus own turning and perspective spreading."""
         pts = [p for p in h if t - p[0] <= C.KIN_WINDOW and p[5] is not None]
         if len(pts) < 4 or pts[-1][0] - pts[0][0] < C.KIN_MIN_SPAN:
             return None
@@ -358,11 +441,11 @@ class BehaviorEngine:
         ts, cx, w, u = a.T
         if lanes_ok:
             return float(np.polyfit(ts, u, 1)[0])
-        if not vehicle:      # человек: u по росту; поворот своей машины сдвигает его на yaw / высоту рамки
+        if not vehicle:      # person: u from height; own turning shifts them by yaw / box height
             hh = pts[-1][4] - pts[-1][2]
             return float(np.polyfit(ts, u, 1)[0] - yaw * aspect / max(hh, 1e-6) * C.PERSON_HEIGHT_M / C.LANE_WIDTH_M)
-        # X = (cx - c) / w;  dX/dt = (dcx/dt - yaw) / w - X * dln(w)/dt  (у машины с постоянным
-        # боковым смещением, которая приближается, dX/dt = 0 — её рамка «уезжает» вбок только из-за перспективы)
+        # X = (cx - c) / w;  dX/dt = (dcx/dt - yaw) / w - X * dln(w)/dt  (a car with a constant lateral
+        # offset that comes closer has dX/dt = 0 - its box drifts sideways only because of perspective)
         dcx = np.polyfit(ts, cx, 1)[0]
         g = np.polyfit(ts, np.log(w), 1)[0]
         X = (cx[-1] - C.CORRIDOR_CENTER_X) / w[-1]
@@ -370,65 +453,73 @@ class BehaviorEngine:
         return float(dX * C.VEHICLE_WIDTH_M / C.LANE_WIDTH_M)
 
     def _predict(self, h, u, du, yaw):
-        """Куда сместится рамка через PREDICT_SEC (для стрелки на экране), доли кадра."""
+        """Where the box will shift in PREDICT_SEC (for the on-screen arrow), frame fractions."""
         _, x1, y1, x2, y2, _ = h[-1]
         if du is None or u is None:
             return None
-        shift = du * C.PREDICT_SEC                          # в полосах
+        shift = du * C.PREDICT_SEC                          # lanes
         lane_w = (x2 - x1) * C.LANE_WIDTH_M / C.VEHICLE_WIDTH_M
         return ((x1 + x2) / 2 + shift * lane_w, y2)
 
-    # ---------- время до столкновения ----------
-    def _ttc(self, h, t, by_height=False):
-        """TTC по скорости роста рамки: d ln(размер)/dt = 1/TTC. Расстояние знать не нужно."""
+    # ---------- time to collision ----------
+    @staticmethod
+    def _rate(h, t, by_height=False):
+        """Box growth rate d ln(size)/dt over TTC_WINDOW and the time spread of the points (None if short)."""
         pts = [(p[0], (p[4] - p[2]) if by_height else (p[3] - p[1])) for p in h if t - p[0] <= C.TTC_WINDOW]
         if len(pts) < 4 or pts[-1][0] - pts[0][0] < C.TTC_MIN_SPAN:
-            return None
-        if not by_height and pts[-1][1] < C.TTC_MIN_WIDTH:
-            return None
+            return None, None, None
         ts, ws = np.array(pts).T
-        rate = np.polyfit(ts, np.log(ws), 1)[0]
-        if rate <= C.TTC_MIN_RATE:
+        return float(np.polyfit(ts, np.log(np.maximum(ws, 1e-6)), 1)[0]), ts, ws
+
+    def _ttc(self, h, t, by_height=False):
+        """TTC from box growth: d ln(size)/dt = 1/TTC. No distance needed."""
+        rate, ts, ws = self._rate(h, t, by_height)
+        if rate is None or (not by_height and ws[-1] < C.TTC_MIN_WIDTH) or rate <= C.TTC_MIN_RATE:
             return None
-        # прямая даёт TTC для середины окна; к текущему моменту он меньше на полокна
+        # the fitted line gives TTC for the middle of the window; now it is smaller by half a window
         return max(1.0 / rate - (ts[-1] - ts.mean()), 0.1)
 
-    # ---------- виляние ----------
-    def _weaving(self, h, t, stats=False, lanes_ok=False):
-        """stats=True — вернуть ещё (амплитуда, смен направления) для отладки.
-        С разметкой положение берём относительно полосы (u в ширинах машины): наши повороты и
-        перестроения не выглядят как виляние машины впереди."""
+    def _brake(self, tid, h, t):
+        """Hard braking of the car ahead: (growth rate now, its rise over BRAKE_JERK_SEC)."""
+        rate, _, _ = self._rate(h, t)
+        q = self.rates[tid]
+        if rate is None:
+            return 0.0, 0.0
+        q.append((t, rate))
+        while t - q[0][0] > C.BRAKE_JERK_SEC:
+            q.popleft()
+        return rate, rate - min(r for _, r in q)
+
+    # ---------- weaving ----------
+    def _weaving(self, h, t, stats=False):
+        """stats=True also returns (amplitude, direction changes) for debugging."""
         out = (lambda ok, st=None: (ok, st)) if stats else (lambda ok, st=None: ok)
-        if lanes_ok:
-            k = C.LANE_WIDTH_M / C.VEHICLE_WIDTH_M
-            pts = [(p[0], 1.0, p[5] * k) for p in h if t - p[0] <= C.WEAVE_WINDOW and p[5] is not None]
-        else:
-            pts = [(p[0], p[3] - p[1], (p[1] + p[3]) / 2) for p in h if t - p[0] <= C.WEAVE_WINDOW]
+        pts = [(p[0], p[3] - p[1], (p[1] + p[3]) / 2) for p in h if t - p[0] <= C.WEAVE_WINDOW]
         if len(pts) < 10 or pts[-1][0] - pts[0][0] < C.WEAVE_MIN_SPAN:
             return out(False)
         ts, ws, xs = np.array(pts).T
         width = ws.mean()
-        if not lanes_ok and width < C.WEAVE_MIN_WIDTH or lanes_ok and h[-1][3] - h[-1][1] < C.WEAVE_MIN_WIDTH:
+        if width < C.WEAVE_MIN_WIDTH:
             return out(False)
-        # 1) амплитуда: убираем общий тренд (поворот дороги), смотрим размах колебаний
+        # 1) amplitude: remove the common trend (road curve), look at the oscillation spread
         resid = xs - np.polyval(np.polyfit(ts, xs, 1), ts)
         amp = resid.std() / width
-        # 2) характер: виляние — это многократная смена направления боковой скорости;
-        #    у перестроения направление одно, у обгона с возвратом — одна смена
+        # 2) character: weaving is repeated reversal of lateral speed;
+        #    a lane change has one direction, an overtake and back - one reversal
         fps = (len(ts) - 1) / (ts[-1] - ts[0])
         k = max(3, int(0.3 * fps))
         smooth = np.convolve(xs, np.ones(k) / k, mode="valid")
-        speed = np.diff(smooth) * fps / width                  # ширин машины в секунду
+        speed = np.diff(smooth) * fps / width                  # car widths per second
         moving = np.sign(speed[np.abs(speed) > C.WEAVE_MIN_SPEED])
         rev = int(np.count_nonzero(np.diff(moving)))
         return out(amp >= C.WEAVE_REL_STD and rev >= C.WEAVE_MIN_REVERSALS, (amp, rev))
 
-    # ---------- авария у любой машины ----------
+    # ---------- crash of any car ----------
     def _crashes(self, t):
-        """Машина «взлетает»: рамка резко уходит вверх и становится выше относительно ширины,
-        а ширина почти не меняется (машина не удаляется). У обычной машины так не бывает:
-        при удалении вместе с подъёмом низа рамки сужается и сама рамка.
-        Качание своей машины (кочки) сдвигает все рамки одинаково — вычитаем медианный сдвиг."""
+        """A car "takes off": its box jumps up and gets taller relative to its width, while the width
+        barely changes (the car is not driving away). A normal car never does that: driving away, its
+        box bottom rises but the box also shrinks. Own pitch (bumps) shifts all boxes equally -
+        subtract the median shift."""
         pairs = {}
         for tid, h in self.hist.items():
             if self.last_seen.get(tid) != t or self.cls.get(tid) not in C.VEHICLE_CLASSES:
@@ -437,6 +528,7 @@ class BehaviorEngine:
             if old is None or old is h[-1] or t - old[0] < C.CRASH_WINDOW / 2:
                 continue
             pairs[tid] = (old, h[-1])
+        self.crash_rise = 0.0
         if not pairs:
             return []
         shifts = [((n[2] + n[4]) - (o[2] + o[4])) / 2 for o, n in pairs.values()]
@@ -449,14 +541,16 @@ class BehaviorEngine:
                 or (n[2] + n[4]) / 2 > C.HOOD_Y
             if cut or w < C.CRASH_MIN_WIDTH or h <= 0 or h0 <= 0:
                 continue
-            rise = -(((n[2] + n[4]) - (o[2] + o[4])) / 2 - ego) / h / dt       # высот рамки в секунду
+            rise = -(((n[2] + n[4]) - (o[2] + o[4])) / 2 - ego) / h / dt       # box heights per second
             taller = math.log((h / w) / (h0 / w0)) / dt
             scale = math.log(w / w0) / dt
+            if abs(scale) < C.CRASH_MAX_SCALE:
+                self.crash_rise = max(self.crash_rise, min(rise, 3.0) * float(taller > 0))
             if rise >= C.CRASH_RISE and taller >= C.CRASH_ASPECT and abs(scale) < C.CRASH_MAX_SCALE:
                 out.append(tid)
         return out
 
-    # ---------- стоп-сигналы (экспериментально) ----------
+    # ---------- brake lights (experimental) ----------
     def _brake_lights(self, frame, d):
         x1, y1, x2, y2 = (max(int(v), 0) for v in d.box)
         roi = frame[(y1 + y2) // 2:y2, x1:x2]
@@ -474,6 +568,5 @@ class BehaviorEngine:
     def _forget(self, t):
         for tid in [k for k, seen in self.last_seen.items() if t - seen > C.TRACK_TTL]:
             del self.last_seen[tid]
-            self.hist.pop(tid, None)
-            self.cls.pop(tid, None)
-            self.red_base.pop(tid, None)
+            for store in (self.hist, self.cls, self.red_base, self.rates, self.first_seen):
+                store.pop(tid, None)

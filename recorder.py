@@ -1,4 +1,4 @@
-"""Автозапись событий: держим в памяти последние секунды и при опасности сохраняем ролик."""
+"""Event recording: keep the last seconds in memory and save a clip when danger is detected."""
 import os
 import time
 from collections import deque
@@ -12,7 +12,7 @@ class EventRecorder:
     def __init__(self, fps, out_dir=C.EVENTS_DIR):
         self.fps = fps
         self.out_dir = out_dir
-        self.buf = deque(maxlen=int(C.RECORD_PRE * fps))   # кадры в JPEG, чтобы не съесть память
+        self.buf = deque(maxlen=int(C.RECORD_PRE * fps))   # JPEG frames, so memory stays small
         self.writer = None
         self.left = 0
         self.last_path = None
@@ -41,7 +41,7 @@ class EventRecorder:
             self.writer.write(cv2.imdecode(jpg, cv2.IMREAD_COLOR))
         self.buf.clear()
         self.left = int(C.RECORD_POST * self.fps)
-        print(f"[rec] сохраняю событие: {self.last_path}")
+        print(f"[rec] saving event: {self.last_path}")
 
     def close(self):
         if self.writer is not None:

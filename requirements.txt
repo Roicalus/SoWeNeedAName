@@ -1,7 +1,10 @@
-onnxruntime
+onnxruntime        # onnxruntime-gpu (CUDA) or onnxruntime-directml (Windows GPU) for acceleration
 opencv-python
 numpy
 pyttsx3
 imageio-ffmpeg
 scikit-learn
-openpyxl
+lightgbm
+requests
+# training only (tools/train_detector.py): torch, torchvision, ultralytics, onnx, onnxslim
+# data only: yt-dlp (tools/prepare_reels.py sources), remotezip

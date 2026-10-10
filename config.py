@@ -1,148 +1,194 @@
-"""Все настраиваемые параметры в одном месте. Пороги подбираются на реальных роликах."""
+"""All tunable parameters in one place. Thresholds are tuned on real footage (tools/replay.py)."""
 
-# ---------- модель ----------
-# yolo11s_fp32: точнее (ночью находит машины в ~3 раза чаще, чем 11n); на Mac с CoreML ~17 мс на кадр.
-# Получить: tools/fp16_to_fp32.py из yolo11s.onnx (unity/inference-engine-yolo). Запасной — yolo11n.onnx.
-MODEL = "models/yolo11s_fp32.onnx"
-ORT_ACCEL = ("CoreMLExecutionProvider", "CUDAExecutionProvider", "DmlExecutionProvider")
+# ---------- model ----------
+# yolo11s_bdd: YOLO11s fine-tuned on BDD100K (day + night dashcam frames, tools/train_detector.py).
+# Fallbacks: yolo11s_fp32.onnx (COCO), yolo11n.onnx (weak laptops).
+MODEL = "models/yolo11s_bdd.onnx"
+MODEL_FALLBACK = "models/yolo11s_fp32.onnx"
+ORT_ACCEL = ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider")
 NMS_IOU = 0.45
-ORT_THREADS = 4                # потоков для нейросети; 0 — авто (на слабых CPU 4 обычно быстрее)
+ORT_THREADS = 4                # CPU threads for the network; 0 = auto
 VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 PERSON_CLASS = 0
+BICYCLE_CLASS = 1
+TRAFFIC_LIGHT_CLASS = 9
 
-# ---------- своя полоса: трапеция перед машиной (доли кадра) ----------
-CORRIDOR_TOP_Y = 0.45         # верхний край трапеции (примерно горизонт)
-CORRIDOR_TOP_HALF = 0.08      # полуширина вверху
-CORRIDOR_BOTTOM_HALF = 0.30   # полуширина внизу (для широкоугольных камер — уже)
-CORRIDOR_CENTER_X = 0.5       # сдвинуть, если камера стоит не по центру
-LEAD_MAX_OFFSET = 0.7         # машина на нашей траектории: боковое смещение не больше 0.7 её ширины
-LEAD_MAX_ASPECT = 1.9         # рамка шире высоты в 1.9+ раза — машина видна сбоку, не «впереди»
-EDGE_MARGIN = 0.01            # рамки, касающиеся боковых краёв кадра, не считаем «машиной впереди»
-HOOD_Y = 0.85                # рамки с центром ниже этой линии — капот своей машины
+# ---------- own lane without lane markings: trapezoid in front of the car (frame fractions) ----------
+CORRIDOR_TOP_Y = 0.45         # top edge of the trapezoid (roughly the horizon)
+CORRIDOR_TOP_HALF = 0.08      # half-width at the top
+CORRIDOR_BOTTOM_HALF = 0.30   # half-width at the bottom (narrower for wide-angle cameras)
+CORRIDOR_CENTER_X = 0.5       # shift if the camera is not centred
+LEAD_MAX_OFFSET = 0.7         # car on our path: lateral offset at most 0.7 of its own width
+LEAD_MAX_ASPECT = 1.9         # box 1.9+ times wider than tall: car seen from the side, not "ahead"
+EDGE_MARGIN = 0.01            # boxes touching the left/right frame edge are not "the car ahead"
+HOOD_Y = 0.85                 # boxes centred below this line are our own hood
 
-# ---------- камера (для оценки дистанции) ----------
-CAMERA_HFOV_DEG = 70          # горизонтальный угол обзора камеры; подберите под свой регистратор
-VEHICLE_WIDTH_M = 1.8         # средняя ширина легковушки
-PERSON_HEIGHT_M = 1.7         # средний рост человека
-CAR_HEIGHT_M = 1.5            # высота легковушки — дистанция до машины, которая видна сбоку
-TRUCK_HEIGHT_M = 3.0          # грузовик, автобус
-LEAD_MAX_CLOSING = 12.0       # сближение быстрее, м/с (~43 км/ч) — скорее всего встречная машина
+# ---------- camera (distance estimate) ----------
+CAMERA_HFOV_DEG = 70          # horizontal field of view; set for your dashcam
+VEHICLE_WIDTH_M = 1.8         # average car width
+PERSON_HEIGHT_M = 1.7         # average person height
+CAR_HEIGHT_M = 1.5            # car height: distance to a car seen from the side
+TRUCK_HEIGHT_M = 3.0          # truck, bus
+LEAD_MAX_CLOSING = 12.0       # closing faster than this, m/s (~43 km/h): most likely an oncoming car
 
-# ---------- трекер ----------
-TRACK_HIGH_CONF = 0.40        # уверенные детекции: создают и ведут треки
-TRACK_LOW_CONF = 0.15         # неуверенные: только продлевают уже существующие треки
-TRACK_IOU = 0.30              # минимальное перекрытие для сопоставления
-TRACK_MAX_MISSED = 15         # сколько кадров трек живёт без детекций
-TRACK_MIN_HITS = 2            # показывать трек после N подтверждений
+# ---------- tracker ----------
+TRACK_HIGH_CONF = 0.40        # confident detections create and extend tracks
+TRACK_LOW_CONF = 0.15         # weak detections only extend existing tracks
+TRACK_IOU = 0.30              # minimum overlap to match
+TRACK_MAX_MISSED = 15         # frames a track survives without detections
+TRACK_MIN_HITS = 2            # show a track after N confirmations
 
-# ---------- история треков ----------
-HISTORY_SEC = 5.5             # сколько секунд истории хранить по каждой машине
-TRACK_TTL = 2.0               # забыть трек, если его не видно столько секунд
+# ---------- track history ----------
+HISTORY_SEC = 5.5             # seconds of history kept per object
+TRACK_TTL = 2.0               # forget a track unseen for this long
 
-# ---------- время до столкновения (TTC) ----------
-TTC_WINDOW = 0.6              # окно оценки скорости роста рамки, с
-TTC_MIN_SPAN = 0.4            # минимум истории для оценки, с
-TTC_MIN_RATE = 0.05           # рост медленнее 5%/с — не сближаемся
-TTC_MIN_WIDTH = 0.06          # слишком далёкие машины игнорируем (доля ширины кадра)
-TTC_WARNING = 3.0             # быстрое сближение, с
-TTC_CRITICAL = 1.5            # критическое сближение, с
-CRITICAL_MIN_WIDTH = 0.12     # «Тормозите!» только если машина уже близко
-CLOSE_WIDTH = 0.40            # рамка шире 40% кадра — слишком близко
-CLOSE_MAX_TTC = 6.0           # …и сближаемся (TTC < 6 с); стоять вплотную в пробке — нормально
+# ---------- time to collision (TTC) ----------
+TTC_WINDOW = 0.6              # window for the box growth rate, s
+TTC_MIN_SPAN = 0.4            # minimum history for an estimate, s
+TTC_MIN_RATE = 0.05           # growth slower than 5%/s: not closing in
+TTC_MIN_WIDTH = 0.06          # ignore far cars (fraction of frame width)
+TTC_WARNING = 3.0             # fast closing, s
+TTC_CRITICAL = 1.5            # critical closing, s
+CRITICAL_MIN_WIDTH = 0.12     # "Brake!" only when the car is already close
+CLOSE_WIDTH = 0.40            # box wider than 40% of the frame: too close
+CLOSE_MAX_TTC = 6.0           # ...and closing in (TTC < 6 s); standing bumper to bumper in a jam is fine
 
-# ---------- виляние машины впереди ----------
-WEAVE_WINDOW = 5.0            # окно анализа, с
-WEAVE_MIN_SPAN = 4.0          # минимум истории, с
-WEAVE_MIN_WIDTH = 0.05        # слишком далёкие машины не анализируем
-WEAVE_REL_STD = 0.15          # амплитуда колебаний в долях ширины машины (~0.25 м)
-WEAVE_MIN_SPEED = 0.15        # боковая скорость меньше этой (ширин/с) — шум, не движение
-WEAVE_MIN_REVERSALS = 2       # минимум смен направления (перестроение — 0, обгон с возвратом — 1)
+# ---------- hard braking of the car ahead ----------
+# growth rate g = d ln(w)/dt = closing speed / distance. A car that starts braking hard makes g jump
+# from ~0 to a large value within a second; steady following keeps g ~ 0.
+BRAKE_RATE = 0.12             # g at least this (1/s)
+BRAKE_JERK = 0.20             # and g rose by at least this within BRAKE_JERK_SEC
+BRAKE_JERK_SEC = 1.0
+BRAKE_MAX_DIST = 40.0         # only for cars closer than this, m
+BRAKE_CRIT_TTC = 2.0          # hard braking with TTC below this is red
 
-# ---------- авария у любой машины в кадре ----------
-CRASH_WINDOW = 0.4            # за сколько секунд сравниваем рамку
-CRASH_RISE = 0.6              # рамка поднялась быстрее 0.6 своей высоты в секунду (без качки своей машины)
-CRASH_ASPECT = 0.5            # и стала заметно выше относительно ширины (ln(h/w) растёт > 0.5 в секунду)
-CRASH_MAX_SCALE = 0.5         # а ширина почти не изменилась (машина не уезжает и не приближается)
-CRASH_MIN_WIDTH = 0.06        # далёкие маленькие рамки слишком шумные
-CRASH_HOLD = 3.0              # сколько секунд держать тревогу после признаков аварии
+# ---------- weaving of the car ahead ----------
+WEAVE_WINDOW = 5.0            # analysis window, s
+WEAVE_MIN_SPAN = 4.0          # minimum history, s
+WEAVE_MIN_WIDTH = 0.05        # skip far cars
+WEAVE_REL_STD = 0.15          # oscillation amplitude in car widths (~0.25 m)
+WEAVE_MIN_SPEED = 0.15        # lateral speed below this (widths/s) is noise
+WEAVE_MIN_REVERSALS = 2       # direction changes (lane change - 0, overtake and back - 1)
 
-# ---------- положение участников относительно полос (behavior.py) ----------
-LANE_WIDTH_M = 3.5            # ширина полосы — для перевода метров в «полосы» без разметки
-IN_LANE = 0.4                 # |u| ≤ 0.4 полосы — участник на нашей полосе (0 — центр, 1 — центр соседней)
-KIN_WINDOW = 0.6              # окно оценки боковой скорости, с
-KIN_MIN_SPAN = 0.3            # минимум истории для неё, с
-YAW_MIN_TRACKS = 3            # поворот своей машины оцениваем по сдвигу не меньше чем 3 рамок
-PREDICT_SEC = 1.0             # стрелка на экране: где будет участник через секунду
+# ---------- crash of any car in view ----------
+CRASH_WINDOW = 0.4            # compare the box over this many seconds
+CRASH_RISE = 0.6              # box rose faster than 0.6 of its height per second (ego pitch removed)
+CRASH_ASPECT = 0.5            # and became taller relative to width (ln(h/w) grows > 0.5 per second)
+CRASH_MAX_SCALE = 0.5         # while the width barely changed (not driving away or approaching)
+CRASH_MIN_WIDTH = 0.06        # small far boxes are too noisy
+CRASH_HOLD = 3.0              # keep the alarm this long after crash signs
 
-# ---------- подрезание и пересечение пути ----------
-CUTIN_MAX_U = 1.6             # смотрим машины не дальше соседней полосы
-CUTIN_MIN_SPEED = 0.6         # движется к нашей полосе быстрее 0.6 полосы/с (~2 м/с)
-CUTIN_HORIZON = 1.0           # и окажется в ней не позже чем через 1 с
-CUTIN_MAX_DIST = 25.0         # и ближе 25 м
-CROSS_MIN_ASPECT = 1.6        # рамка шире высоты в 1.6+ раза — машина видна сбоку: «пересекает путь», а не перестраивается
-CUTIN_TTC = 3.0               # подрезание/пересечение опасно, если мы к машине приближаемся (TTC ≤ 3 с) или она ближе CRIT_DIST
-CUTIN_CRIT_TTC = 2.0          # критично («красный»), если до него меньше 2 с
-CRIT_DIST = 10.0              # ближе 10 м — критично («Тормозите!»-уровень)
-WRONGWAY_TTC = 4.0            # встречная по нашей полосе (видно по разметке) и TTC меньше 4 с
+# ---------- object position relative to lanes (behavior.py) ----------
+LANE_WIDTH_M = 3.5            # lane width: converts metres to "lanes" without markings
+IN_LANE = 0.4                 # |u| <= 0.4 lanes: object is in our lane (0 = centre, 1 = centre of the next one)
+KIN_WINDOW = 0.6              # window for lateral speed, s
+KIN_MIN_SPAN = 0.3            # minimum history for it, s
+YAW_MIN_TRACKS = 3            # own turning is estimated from the shift of at least 3 boxes
+PREDICT_SEC = 1.0             # on-screen arrow: where the object will be in a second
 
-# ---------- пешеходы, велосипеды, мотоциклы ----------
-VRU_NEAR = 12.0               # на нашей полосе ближе 12 м — предупреждаем
-VRU_DIST = 25.0               # идёт к нашей полосе — смотрим на дистанции до 25 м
-VRU_MIN_SPEED = 0.5           # полосы/с (~1.7 м/с — быстрый шаг, бег, велосипед)
-VRU_HORIZON = 1.5             # окажется на нашей полосе не позже чем через 1.5 с
+# ---------- cut-in and crossing ----------
+CUTIN_MAX_U = 1.6             # look at cars up to the neighbouring lane
+CUTIN_MIN_SPEED = 0.6         # moving towards our lane faster than 0.6 lanes/s (~2 m/s)
+CUTIN_HORIZON = 1.0           # and will be in it within 1 s
+CUTIN_MAX_DIST = 25.0         # and closer than 25 m
+CROSS_MIN_ASPECT = 1.6        # box 1.6+ times wider than tall: car seen from the side - "crossing", not a lane change
+CUTIN_TTC = 3.0               # cut-in/crossing is dangerous if we close in on it (TTC <= 3 s) or it is within CRIT_DIST
+CUTIN_CRIT_TTC = 2.0          # red if TTC below 2 s
+CRIT_DIST = 10.0              # closer than 10 m: critical
+WRONGWAY_TTC = 4.0            # oncoming car in our lane (seen by lane markings) with TTC below 4 s
 
-# ---------- стоп-сигналы (экспериментально) ----------
+# ---------- slow drift of a neighbour towards our lane (attention, green) ----------
+DRIFT_MIN_SPEED = 0.25        # lanes/s
+DRIFT_HORIZON = 2.5           # reaches our lane within this many seconds
+DRIFT_MAX_DIST = 35.0
+
+# ---------- pedestrians, bicycles, motorcycles (vulnerable road users, VRU) ----------
+VRU_NEAR = 12.0               # in our lane closer than 12 m: warn
+VRU_DIST = 25.0               # heading to our lane: look up to 25 m
+VRU_MIN_SPEED = 0.5           # lanes/s (~1.7 m/s: fast walk, run, bicycle)
+VRU_HORIZON = 1.5             # will be in our lane within 1.5 s
+VRU_ATTENTION_DIST = 30.0     # VRU near the road edge ahead (|u| < VRU_EDGE_U) closer than this: attention
+VRU_EDGE_U = 1.3
+VRU_SUDDEN_AGE = 1.0          # a VRU track younger than this...
+VRU_SUDDEN_DIST = 20.0        # ...that appears this close and near our path: "sudden appearance"
+VRU_SUDDEN_U = 1.2
+
+# ---------- crosswalk (crosswalk.py) ----------
+CROSSWALK = True
+CROSSWALK_EVERY = 2           # look for zebra stripes every N-th analysis
+CROSSWALK_DIST = 40.0         # pedestrian on/near a crosswalk closer than this: attention
+
+# ---------- ego motion (egomotion.py) ----------
+EGO_STOPPED = 0.15            # normalised flow below this: we are (almost) standing still
+
+# ---------- brake lights (experimental) ----------
 BRAKE_LIGHTS = False
-BRAKE_RED_MIN = 0.03          # минимальная доля красных пикселей
-BRAKE_RED_JUMP = 2.0          # во сколько раз доля должна вырасти относительно обычной
+BRAKE_RED_MIN = 0.03          # minimum share of red pixels
+BRAKE_RED_JUMP = 2.0          # how many times the share must exceed the usual one
 
-# ---------- предупреждения: тип -> (уровень, текст на экране, фраза) ----------
+# ---------- alert levels ----------
+# 1 = GREEN  - pay attention (nothing dangerous yet, but worth watching)
+# 2 = YELLOW - possible risk (be ready to brake)
+# 3 = RED    - dangerous manoeuvre or crash: act now
+LEVEL_NAMES = {0: "clear", 1: "attention", 2: "risk", 3: "danger"}
+
+# kind -> (base level, screen text, voice phrase). Rules may raise the level of a particular threat.
+LANG = "en"
 ALERTS = {
-    "ttc":        (3, "BRAKE!",       "Тормозите!"),
-    "crash":      (3, "CRASH AHEAD",  "Авария впереди!"),
-    "wrongway":   (3, "WRONG WAY CAR", "Встречная на вашей полосе!"),
-    "cutin":      (2, "CUT-IN",       "Подрезают!"),
-    "crossing":   (2, "CROSSING",     "Машина пересекает путь!"),
-    "danger":     (2, "DANGER",       "Опасно!"),
-    "closing":    (2, "CLOSING IN",   "Внимание, сближение"),
-    "weave":      (2, "WEAVING AHEAD", "Машина впереди виляет, держите дистанцию"),
-    "ped":        (2, "PEDESTRIAN",   "Пешеход на дороге!"),
-    "brakelight": (1, "BRAKE LIGHTS", "Стоп-сигналы впереди"),
-    "close":      (1, "TOO CLOSE",    "Слишком близко"),
+    "ttc":        (3, "BRAKE!",            "Brake!"),
+    "crash":      (3, "CRASH AHEAD",       "Crash ahead!"),
+    "wrongway":   (3, "WRONG-WAY CAR",     "Oncoming car in your lane!"),
+    "hardbrake":  (2, "HARD BRAKING",      "Car ahead is braking hard"),
+    "cutin":      (2, "CUT-IN",            "Car cutting in"),
+    "crossing":   (2, "CROSSING",          "Car crossing your path"),
+    "ped":        (2, "PEDESTRIAN",        "Pedestrian on the road"),
+    "danger":     (2, "DANGER",            "Danger ahead"),
+    "closing":    (2, "CLOSING IN",        "Traffic slowing ahead"),
+    "weave":      (2, "ERRATIC DRIVER",    "Erratic driver ahead, keep your distance"),
+    "ped_xwalk":  (1, "PED AT CROSSWALK",  "Pedestrian at the crossing"),
+    "vru_near":   (1, "PEDESTRIAN NEAR",   "Watch the pedestrian"),
+    "drift":      (1, "CAR DRIFTING",      "Car drifting into your lane"),
+    "close":      (1, "TOO CLOSE",         "Keep your distance"),
+    "brakelight": (1, "BRAKE LIGHTS",      "Brake lights ahead"),
 }
-# сколько секунд условие должно держаться без перерыва, чтобы сработать (защита от шума)
-CONFIRM_SEC = {"danger": 0.2, "ttc": 0.1, "crash": 0.0, "wrongway": 0.1, "cutin": 0.2, "crossing": 0.2, "closing": 0.3, "weave": 0.0, "ped": 0.2, "brakelight": 0.2, "close": 0.5}
-RAW_GAP = 0.3                 # провал условия короче этого не сбрасывает подтверждение
-ALERT_HOLD = 0.4              # предупреждение держится столько после пропадания условия (не мигает)
-# не повторять одну и ту же фразу чаще, с
-VOICE_COOLDOWN = {"danger": 4, "ttc": 2.5, "crash": 6, "wrongway": 4, "cutin": 4, "crossing": 4, "closing": 4, "weave": 10, "ped": 4, "brakelight": 5, "close": 8}
-VOICE_MAX_DELAY = 1.5         # фразу, которая ждала дольше, выбрасываем — она уже не актуальна
-BEEP = True                   # короткий сигнал перед фразой (sounds/beep.wav, beep_crit.wav)
-BEEP_CRIT_LEVEL = 3           # с какого уровня звучит «критичный» сигнал
+# how long a condition must hold without interruption to fire (noise protection)
+CONFIRM_SEC = {"danger": 0.2, "ttc": 0.1, "crash": 0.0, "wrongway": 0.1, "hardbrake": 0.1, "cutin": 0.2,
+               "crossing": 0.2, "closing": 0.3, "weave": 0.0, "ped": 0.2, "ped_xwalk": 0.3, "vru_near": 0.5,
+               "drift": 0.3, "brakelight": 0.2, "close": 0.5}
+RAW_GAP = 0.3                 # a dropout shorter than this does not reset confirmation
+ALERT_HOLD = 0.4              # an alert stays this long after the condition disappears (no flicker)
+VOICE_COOLDOWN = {"danger": 4, "ttc": 2.5, "crash": 6, "wrongway": 4, "hardbrake": 4, "cutin": 4, "crossing": 4,
+                  "closing": 6, "weave": 10, "ped": 4, "ped_xwalk": 15, "vru_near": 20, "drift": 10,
+                  "brakelight": 8, "close": 15}
+VOICE_MAX_DELAY = 1.5         # drop a phrase that waited longer: it is no longer relevant
+BEEP = True                   # short chime before the phrase (sounds/beep.wav, beep_crit.wav)
+BEEP_CRIT_LEVEL = 3           # level from which the "critical" chime plays
+# Advisor (advisor.py): budget for non-urgent phrases so the driver does not learn to ignore them
+HINT_GAP = {1: 10.0, 2: 3.0}  # min seconds between two spoken hints of this level (red has no budget)
+SPEAK_GREEN = True            # speak green "attention" hints (else glow only)
 
-# ---------- автозапись событий ----------
-RECORD_LEVEL = 3              # с какого уровня сохранять ролик
-RECORD_PRE = 5.0              # секунд до события
-RECORD_POST = 5.0             # секунд после события
+# ---------- event recording ----------
+RECORD_LEVEL = 3              # record a clip from this level
+RECORD_PRE = 5.0              # seconds before the event
+RECORD_POST = 5.0             # seconds after the event
 EVENTS_DIR = "events"
 
-# ---------- оценка (evaluate.py) ----------
-EVENT_GAP = 1.5               # перерыв, после которого то же предупреждение считается новым событием, с
-EVAL_EARLY = 3.0              # предупреждение за столько секунд до опасности засчитывается
+# ---------- evaluation (evaluate.py, tools/replay.py) ----------
+EVENT_GAP = 1.5               # pause after which the same alert counts as a new event, s
+EVAL_EARLY = 3.0              # an alert up to this many seconds before the labelled danger counts
 
-# ---------- полосы движения (lanes.py) ----------
+# ---------- lanes (lanes.py) ----------
 LANE_MODEL = "models/ufldv2_culane_res18_320x1600.onnx"
-LANE_ROWS = [round(0.45 + 0.025 * k, 3) for k in range(23)]   # строки, на которых храним линии (доля высоты)
-LANE_EVERY = 1                # искать разметку на каждом N-м анализе (2–3 на слабом ноутбуке без GPU)
-LANE_MIN_SHARE = 0.25         # линия засчитана, если найдена хотя бы на четверти строк
-LANE_HOLD = 1.0               # сколько секунд помнить линию, которую перестали видеть
-LANE_SMOOTH = 0.6             # сглаживание во времени (доля старого значения)
-LANE_FIT_RMS = 0.012          # разброс точек линии вокруг гладкой кривой (доли ширины), больше — линию не берём
-LANE_EXTEND = 0.05            # насколько продлевать линию вверх за найденный участок
-LANE_MIN_WIDTH = 0.05         # ширина своей полосы в кадре (доли), иначе разметка найдена неверно
+LANE_ROWS = [round(0.45 + 0.025 * k, 3) for k in range(23)]   # rows where lines are stored (fraction of height)
+LANE_EVERY = 1                # detect lanes on every N-th analysis (2-3 on a weak laptop)
+LANE_MIN_SHARE = 0.25         # a line counts if found on at least a quarter of the rows
+LANE_HOLD = 1.0               # seconds to remember a line that is no longer seen
+LANE_SMOOTH = 0.6             # temporal smoothing (share of the old value)
+LANE_FIT_RMS = 0.012          # scatter of line points around a smooth curve (frame widths); larger - drop the line
+LANE_EXTEND = 0.05            # extend the line upward beyond the found part
+LANE_MIN_WIDTH = 0.05         # own lane width in the frame (fraction), otherwise markings are wrong
 LANE_MAX_WIDTH = 0.9
 
-# ---------- обученная модель риска (risk.py, tools/train_risk.py) ----------
+# ---------- learned risk model (risk.py, tools/train_risk.py) ----------
 RISK_MODEL = "models/risk.json"
-RISK_POOL_SEC = 0.5           # признаки берутся максимумом за последние 0.5 с
-RISK_CONFIRM = 0.2            # вероятность выше порога должна держаться столько, с
+RISK_CONFIRM = 0.2            # probability above threshold must hold this long, s

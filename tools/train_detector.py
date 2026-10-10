@@ -1,34 +1,34 @@
-"""Дообучение YOLO11s на BDD100K (ночь, плотный трафик) с сохранением COCO-разметки классов.
+"""Fine-tune YOLO11 on BDD100K (night, dense traffic, US dashcams) while keeping COCO class ids.
 
-Зачем: COCO-модель ночью почти не видит машины (фары, засветка, тёмные силуэты). BDD100K — 80 тыс.
-кадров с регистраторов США, ~40 % ночных. Учим на нём, но выход оставляем 4 + 80 каналов
-и COCO-номера классов, поэтому новый .onnx — прямая замена в detector.py (ничего менять не нужно).
+Why: the COCO model barely sees cars at night (headlights, glare, dark silhouettes) and misses many
+small far objects in dashcam footage. BDD100K is 80k dashcam frames, ~40% of them at night. We train on
+it but keep the 4 + 80 output channels and COCO class numbers, so the new .onnx is a drop-in
+replacement for detector.py (nothing else changes).
 
-Данные (официальный сайт BDD100K не работает, берём открытые копии с Hugging Face, без логина):
-    кадры:        https://huggingface.co/datasets/Xing1210/bdd100k  (один zip 5.7 ГБ, все 100 тыс. кадров)
-    рамки:        https://huggingface.co/datasets/dronefreak/BDD100K
-                  (только metadata.jsonl по шардам: рамки x,y,w,h в пикселях, 10 классов BDD;
-                   train 59 384 / valid 10 479 / test 10 000 = официальный val BDD)
-    время суток:  https://huggingface.co/datasets/dronefreak/BDD100K-Period-Classification
-                  (метка daytime / night / dawn or dusk для каждого кадра, по имени файла)
-Покадровая загрузка с HF упирается в лимит 3000 запросов / 5 мин, поэтому кадры берём одним zip.
+Data (the official BDD100K site is down; open Hugging Face copies, no login):
+    frames:      https://huggingface.co/datasets/Xing1210/bdd100k  (one 5.7 GB zip, all 100k frames)
+    boxes:       https://huggingface.co/datasets/dronefreak/BDD100K
+                 (metadata.jsonl shards: boxes x,y,w,h in pixels, 10 BDD classes;
+                  train 59 384 / valid 10 479 / test 10 000 = official BDD val)
+    time of day: https://huggingface.co/datasets/dronefreak/BDD100K-Period-Classification
+Class mapping BDD -> COCO: person, rider -> person; car; truck; bus; train -> train; motor -> motorcycle;
+bike -> bicycle; traffic light -> traffic light. Traffic signs are dropped (COCO has only stop sign).
 
-Обучение идёт в отдельном окружении (PyTorch нужен только здесь, сам проект работает на ONNX Runtime):
-    python3 -m venv .venv-train
-    .venv-train/bin/pip install torch torchvision "ultralytics>=8.3,<8.4" onnx onnxslim onnxruntime huggingface_hub
+Training needs PyTorch (only here - the app itself runs on ONNX Runtime):
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    pip install ultralytics onnx onnxslim
 
-Всё сразу (скачать -> подготовить -> обучить -> оценить -> экспорт в models/yolo11s_bdd.onnx):
-    .venv-train/bin/python tools/train_detector.py all --train-n 10000 --epochs 8 --device mps
-По шагам:
-    .venv-train/bin/python tools/train_detector.py download
-    .venv-train/bin/python tools/train_detector.py prep --train-n 0 --night-share 0.4   # 0 = весь train
-    .venv-train/bin/python tools/train_detector.py train --epochs 30 --batch 32 --device 0   # 0 = CUDA
-    .venv-train/bin/python tools/train_detector.py eval --weights data/bdd_det/weights/yolo11s.pt \
-        runs/bdd/yolo11s_bdd/weights/best.pt
-    .venv-train/bin/python tools/train_detector.py export
-    .venv/bin/python tools/train_detector.py video --onnx models/yolo11s_fp32.onnx models/yolo11s_bdd.onnx
+Everything (download -> prepare -> train -> evaluate -> export models/<arch>_bdd.onnx):
+    python tools/train_detector.py all --train-n 0 --epochs 30 --device 0
+Step by step:
+    python tools/train_detector.py download
+    python tools/train_detector.py prep --train-n 0 --night-share 0.4        # 0 = the whole train split
+    python tools/train_detector.py train --arch yolo11s --epochs 30 --batch 32 --device 0
+    python tools/train_detector.py eval --weights data/bdd_det/weights/yolo11s.pt runs/bdd/yolo11s_bdd/weights/best.pt
+    python tools/train_detector.py export --arch yolo11s
+    python tools/train_detector.py video --onnx models/yolo11s_fp32.onnx models/yolo11s_bdd.onnx
 
-Отложенная проверка — официальный val BDD (10 000 кадров, в обучение не попадает), отдельно день и ночь.
+The held-out check is the official BDD val (10 000 frames, never trained on), day and night separately.
 """
 import argparse
 import glob
@@ -43,53 +43,57 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data", "bdd_det")
 ZIP = os.path.join(DATA, "zip", "bdd100k_images_100k.zip")
-YOLO = os.path.join(DATA, "yolo")          # подготовленный набор: images/<split>/*.jpg + labels/<split>/*.txt
-META = os.path.join(DATA, "meta")          # metadata.jsonl: рамки (det_*) и время суток (period_*)
-WEIGHTS = os.path.join(DATA, "weights", "yolo11s.pt")
+YOLO = os.path.join(DATA, "yolo")          # prepared set: images/<split>/*.jpg + labels/<split>/*.txt
+META = os.path.join(DATA, "meta")          # metadata.jsonl: boxes (det_*) and time of day (period_*)
 HF = "https://huggingface.co/datasets/"
 ZIP_URL = HF + "Xing1210/bdd100k/resolve/main/bdd100k_images_100k.zip"
 DET_URL = HF + "dronefreak/BDD100K/resolve/main/data/images/{split}/shard_{s:03d}/metadata.jsonl"
 PERIOD_URL = HF + "dronefreak/BDD100K-Period-Classification/resolve/main/data/images/{split}/shard_{s:03d}/metadata.jsonl"
-COCO_PT_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt"
+PT_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/{arch}.pt"
 DET_SHARDS = {"train": 8, "valid": 2, "test": 2}
 PERIOD_SHARDS = {"train": 9, "valid": 2}
-IMG_W, IMG_H = 1280, 720                   # все кадры BDD100K 1280x720
+IMG_W, IMG_H = 1280, 720                   # all BDD100K frames are 1280x720
 RUNS = os.path.join(ROOT, "runs", "bdd")
-RUN_NAME = "yolo11s_bdd"
 
-# класс BDD (как в data.yaml у dronefreak) -> класс COCO; остальные (train, светофор, знак) выбрасываем
+# BDD class (as in dronefreak's data.yaml) -> COCO class; the rest (traffic sign) is dropped
 BDD_TO_COCO = {
     0: 0,   # person -> person
-    1: 0,   # rider (велосипедист/мотоциклист) -> person
+    1: 0,   # rider (cyclist / motorcyclist) -> person
     2: 2,   # car -> car
     3: 7,   # truck -> truck
     4: 5,   # bus -> bus
+    5: 6,   # train (incl. tram) -> train
     6: 3,   # motor -> motorcycle
     7: 1,   # bike -> bicycle
+    8: 9,   # traffic light -> traffic light (junction context)
 }
-VEHICLES = [2, 3, 5, 7]          # те же, что C.VEHICLE_CLASSES в config.py
-EVAL_CLASSES = [0, 1, 2, 3, 5, 7]
+VEHICLES = [2, 3, 5, 7]          # same as C.VEHICLE_CLASSES in config.py
 
 
-def coco_names():
-    """80 имён COCO в порядке номеров (берём из самой модели, чтобы не ошибиться)."""
+def weights(arch):
+    return os.path.join(DATA, "weights", f"{arch}.pt")
+
+
+def coco_names(arch="yolo11s"):
+    """80 COCO names in id order (taken from the model itself)."""
     from ultralytics import YOLO as Y
-    return Y(WEIGHTS).names
+    fetch(PT_URL.format(arch=arch), weights(arch))
+    return Y(weights(arch)).names
 
 
 def fetch(url, dst):
     if not os.path.exists(dst):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        print("скачиваю", url)
+        print("downloading", url)
         urllib.request.urlretrieve(url, dst + ".part")
         os.replace(dst + ".part", dst)
 
 
-# ---------------------------------------------------------------- скачивание
-def download():
-    """zip с кадрами (5.7 ГБ), разметку и время суток (несколько jsonl), веса COCO yolo11s.pt."""
+# ---------------------------------------------------------------- download
+def download(arch):
+    """Frames zip (5.7 GB), boxes and time of day (several jsonl), COCO weights."""
     t = time.time()
-    fetch(COCO_PT_URL, WEIGHTS)
+    fetch(PT_URL.format(arch=arch), weights(arch))
     for split, n in DET_SHARDS.items():
         for s in range(n):
             fetch(DET_URL.format(split=split, s=s), os.path.join(META, f"det_{split}_{s:03d}.jsonl"))
@@ -97,32 +101,32 @@ def download():
         for s in range(n):
             fetch(PERIOD_URL.format(split=split, s=s), os.path.join(META, f"period_{split}_{s:03d}.jsonl"))
     fetch(ZIP_URL, ZIP)
-    print(f"скачано за {time.time() - t:.0f} с")
+    print(f"downloaded in {time.time() - t:.0f} s")
 
 
 def timeofday():
-    """имя файла -> 'daytime' / 'night' / 'dawn or dusk' / 'unknown'."""
+    """file name -> 'daytime' / 'night' / 'dawn or dusk' / 'unknown'."""
     tod = {}
     for f in glob.glob(os.path.join(META, "period_*.jsonl")):
-        for line in open(f):
+        for line in open(f, encoding="utf-8"):
             d = json.loads(line)
             tod[d["file_name"]] = d["label"]
     return tod
 
 
 def boxes(split):
-    """имя файла -> список (класс BDD, x, y, w, h в пикселях) для train / valid / test (dronefreak)."""
+    """file name -> [(BDD class, x, y, w, h in pixels)] for train / valid / test (dronefreak)."""
     res = {}
     for f in sorted(glob.glob(os.path.join(META, f"det_{split}_*.jsonl"))):
-        for line in open(f):
+        for line in open(f, encoding="utf-8"):
             d = json.loads(line)
             res[d["file_name"]] = list(zip(d["objects"]["categories"], d["objects"]["bbox"]))
     return res
 
 
-# ---------------------------------------------------------------- подготовка
+# ---------------------------------------------------------------- preparation
 def yolo_lines(objs):
-    """Рамки BDD -> строки YOLO с номерами COCO (центр, ширина, высота в долях кадра)."""
+    """BDD boxes -> YOLO lines with COCO ids (centre, width, height as frame fractions)."""
     out = []
     for c, (x, y, w, h) in objs:
         if c in BDD_TO_COCO and w > 1 and h > 1:
@@ -132,7 +136,7 @@ def yolo_lines(objs):
 
 
 def add_split(zf, members, names, split, labels, tod):
-    """Распаковывает кадры в yolo/images/<split>/ и пишет метки в yolo/labels/<split>/."""
+    """Extracts frames to yolo/images/<split>/ and writes labels to yolo/labels/<split>/."""
     di, dl = os.path.join(YOLO, "images", split), os.path.join(YOLO, "labels", split)
     os.makedirs(di, exist_ok=True)
     os.makedirs(dl, exist_ok=True)
@@ -143,20 +147,20 @@ def add_split(zf, members, names, split, labels, tod):
             with zf.open(members[name]) as src, open(img, "wb") as dst:
                 shutil.copyfileobj(src, dst)
         lines = yolo_lines(labels[name])
-        with open(os.path.join(dl, name[:-4] + ".txt"), "w") as f:
+        with open(os.path.join(dl, name[:-4] + ".txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + ("\n" if lines else ""))
         res.append((img, tod.get(name, "unknown")))
     return res
 
 
 def write_list(path, items):
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(items) + "\n")
     return path
 
 
 def write_yaml(path, train, val, names):
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(f"path: {YOLO}\ntrain: {train}\nval: {val}\nnc: {len(names)}\nnames:\n")
         for i in range(len(names)):
             f.write(f"  {i}: {names[i]}\n")
@@ -164,14 +168,14 @@ def write_yaml(path, train, val, names):
 
 
 def prep(train_n, night_share, val_n, train_val_n, seed):
-    """Собирает списки кадров. Ночь добираем повтором ночных кадров в train.txt (оверсэмплинг)."""
+    """Builds the frame lists. Night is topped up by repeating night frames in train.txt (oversampling)."""
     rnd = random.Random(seed)
     tod = timeofday()
     for f in glob.glob(os.path.join(YOLO, "*.cache")) + glob.glob(os.path.join(YOLO, "labels", "*.cache")):
         os.remove(f)
     if os.path.exists(os.path.join(YOLO, "labels")):
         shutil.rmtree(os.path.join(YOLO, "labels"))
-    # пул для обучения — официальный train BDD (у dronefreak это train + valid), проверка — официальный val
+    # training pool = official BDD train (dronefreak's train + valid), check = official val
     pool = {**boxes("train"), **boxes("valid")}
     test_boxes = boxes("test")
     zf = zipfile.ZipFile(ZIP)
@@ -187,18 +191,18 @@ def prep(train_n, night_share, val_n, train_val_n, seed):
     t = time.time()
     train = add_split(zf, members, tr, "train", pool, tod)
     test = add_split(zf, members, te, "val", test_boxes, tod)
-    print(f"распаковано за {time.time() - t:.0f} с")
+    print(f"extracted in {time.time() - t:.0f} s")
 
     night = [p for p, t in train if t == "night"]
     lst = [p for p, _ in train]
     share = len(night) / max(1, len(lst))
-    if night and share < night_share < 1:  # добавить e ночных: (n + e) / (T + e) = night_share
+    if night and share < night_share < 1:  # add e night frames: (n + e) / (T + e) = night_share
         extra = round((night_share * len(lst) - len(night)) / (1 - night_share))
         lst += [rnd.choice(night) for _ in range(extra)]
     rnd.shuffle(lst)
     n_night = sum(tod.get(os.path.basename(p)) == "night" for p in lst)
-    print(f"train: {len(train)} кадров (ночь {share:.0%}), в списке с оверсэмплингом {len(lst)} "
-          f"(ночь {n_night / len(lst):.0%})")
+    print(f"train: {len(train)} frames (night {share:.0%}), list with oversampling {len(lst)} "
+          f"(night {n_night / len(lst):.0%})")
 
     names = coco_names()
     write_list(os.path.join(YOLO, "train.txt"), lst)
@@ -210,28 +214,30 @@ def prep(train_n, night_share, val_n, train_val_n, seed):
         write_list(os.path.join(YOLO, f"val_{g}.txt"), items)
         write_yaml(os.path.join(YOLO, f"eval_{g}.yaml"), "train.txt", f"val_{g}.txt", names)
         print(f"val {g}: {len(items)}")
-    # маленькая проверка во время обучения (полная оценка потом командой eval)
+    # a small check during training (the full evaluation is the eval command)
     write_list(os.path.join(YOLO, "val_mini.txt"), groups["all"][:train_val_n])
     write_yaml(os.path.join(YOLO, "train.yaml"), "train.txt", "val_mini.txt", names)
 
 
-# ---------------------------------------------------------------- обучение
-def train(epochs, batch, device, workers, imgsz, weights, resume, hours):
+# ---------------------------------------------------------------- training
+def train(arch, epochs, batch, device, workers, imgsz, resume, hours):
     from ultralytics import YOLO as Y
     t = time.time()
-    model = Y(os.path.join(RUNS, RUN_NAME, "weights", "last.pt") if resume else weights)
+    run = f"{arch}_bdd"
+    fetch(PT_URL.format(arch=arch), weights(arch))
+    model = Y(os.path.join(RUNS, run, "weights", "last.pt") if resume else weights(arch))
     model.train(data=os.path.join(YOLO, "train.yaml"), epochs=epochs, imgsz=imgsz, batch=batch,
-                device=device, workers=workers, project=RUNS, name=RUN_NAME, exist_ok=True,
-                resume=resume, cos_lr=True, close_mosaic=max(1, epochs // 5), plots=False,
+                device=device, workers=workers, project=RUNS, name=run, exist_ok=True,
+                resume=resume, cos_lr=True, close_mosaic=max(1, epochs // 6), plots=False,
                 patience=100, amp=True, time=hours or None,
-                warmup_epochs=min(3.0, epochs * 0.1))   # аугментации по умолчанию; от готовых весов — короткий разогрев
-    print(f"обучение: {(time.time() - t) / 60:.1f} мин")
-    return os.path.join(RUNS, RUN_NAME, "weights", "best.pt")
+                warmup_epochs=min(3.0, epochs * 0.1))   # default augmentations; short warm-up from pretrained weights
+    print(f"training: {(time.time() - t) / 60:.1f} min")
+    return os.path.join(RUNS, run, "weights", "best.pt")
 
 
-# ---------------------------------------------------------------- оценка
+# ---------------------------------------------------------------- evaluation
 def iou(a, b):
-    """IoU матрица для рамок x1y1x2y2: a (N x 4), b (M x 4)."""
+    """IoU matrix for x1y1x2y2 boxes: a (N x 4), b (M x 4)."""
     import numpy as np
     lt = np.maximum(a[:, None, :2], b[None, :, :2])
     rb = np.minimum(a[:, None, 2:], b[None, :, 2:])
@@ -241,7 +247,7 @@ def iou(a, b):
 
 
 def match(pred, gt, thr=0.5):
-    """Жадное сопоставление по убыванию уверенности (как в COCO). pred: K x 5 (x1y1x2y2, conf)."""
+    """Greedy matching by decreasing confidence (as in COCO). pred: K x 5 (x1y1x2y2, conf)."""
     import numpy as np
     tp = np.zeros(len(pred), bool)
     if len(pred) and len(gt):
@@ -268,10 +274,10 @@ def ap50(tps, confs, n_gt):
 
 
 def gt_boxes(img_path):
-    """Метки YOLO (COCO-номера) -> {группа: рамки x1y1x2y2 в пикселях}."""
+    """YOLO labels (COCO ids) -> {group: x1y1x2y2 boxes in pixels}."""
     import numpy as np
     lab = img_path.replace(os.sep + "images" + os.sep, os.sep + "labels" + os.sep)[:-4] + ".txt"
-    rows = [list(map(float, l.split())) for l in open(lab) if l.strip()]
+    rows = [list(map(float, l.split())) for l in open(lab, encoding="utf-8") if l.strip()]
     a = np.array(rows).reshape(-1, 5)
     xyxy = np.stack([(a[:, 1] - a[:, 3] / 2) * IMG_W, (a[:, 2] - a[:, 4] / 2) * IMG_H,
                      (a[:, 1] + a[:, 3] / 2) * IMG_W, (a[:, 2] + a[:, 4] / 2) * IMG_H], 1)
@@ -279,14 +285,14 @@ def gt_boxes(img_path):
 
 
 def evaluate(weights_list, device, batch):
-    """AP50 «машина» (car/motorcycle/bus/truck как один класс — так их видит detector.py) и «человек»,
-    отдельно для дневных и ночных кадров отложенной проверки (официальный val BDD)."""
+    """AP50 "vehicle" (car/motorcycle/bus/truck as one class - the way detector.py sees them) and
+    "person", separately for day and night frames of the held-out set (official BDD val)."""
     import numpy as np
     import torch
     import torchvision
     from ultralytics import YOLO as Y
-    groups = {g: set(open(os.path.join(YOLO, f"val_{g}.txt")).read().split()) for g in ("day", "night")}
-    images = open(os.path.join(YOLO, "val_all.txt")).read().split()
+    groups = {g: set(open(os.path.join(YOLO, f"val_{g}.txt"), encoding="utf-8").read().split()) for g in ("day", "night")}
+    images = open(os.path.join(YOLO, "val_all.txt"), encoding="utf-8").read().split()
     rows = []
     for w in weights_list:
         model = Y(w)
@@ -302,7 +308,7 @@ def evaluate(weights_list, device, batch):
                 for k in ("vehicle", "person"):
                     sel = np.isin(cls, VEHICLES) if k == "vehicle" else cls == 0
                     p = np.concatenate([xyxy[sel], conf[sel, None]], 1)
-                    if k == "vehicle" and len(p):     # NMS для всех машин вместе, как в detector.py
+                    if k == "vehicle" and len(p):     # NMS over all vehicles together, as in detector.py
                         keep = torchvision.ops.nms(torch.from_numpy(p[:, :4]), torch.from_numpy(p[:, 4]), 0.7)
                         p = p[keep.numpy()]
                     tp = match(p, gt[k])
@@ -312,35 +318,35 @@ def evaluate(weights_list, device, batch):
                             acc[g, k][1].append(p[:, 4])
                             acc[g, k][2][0] += len(gt[k])
         name = os.path.relpath(w, ROOT)
-        print(f"{name}: {time.time() - t:.0f} с на {len(images)} кадров")
+        print(f"{name}: {time.time() - t:.0f} s for {len(images)} frames")
         for g in ("day", "night", "all"):
             rows.append((name, g, len(images) if g == "all" else len(groups[g]),
                          ap50(*acc[g, "vehicle"][:2], acc[g, "vehicle"][2][0]),
                          ap50(*acc[g, "person"][:2], acc[g, "person"][2][0])))
-    print(f"\n{'модель':45s} {'набор':6s} {'кадров':>7s} {'AP50 машины':>12s} {'AP50 люди':>10s}")
+    print(f"\n{'model':45s} {'set':6s} {'frames':>7s} {'AP50 vehicle':>13s} {'AP50 person':>12s}")
     for r in rows:
-        print(f"{r[0]:45s} {r[1]:6s} {r[2]:7d} {r[3]:12.3f} {r[4]:10.3f}")
+        print(f"{r[0]:45s} {r[1]:6s} {r[2]:7d} {r[3]:13.3f} {r[4]:12.3f}")
     return rows
 
 
-# ---------------------------------------------------------------- экспорт
-def export(weights, out, opset):
-    """ONNX как у Ultralytics по умолчанию: 1 x 3 x 640 x 640 -> 1 x 84 x 8400, fp32, без NMS."""
+# ---------------------------------------------------------------- export
+def export(weights_path, out, opset):
+    """ONNX as Ultralytics exports by default: 1 x 3 x 640 x 640 -> 1 x 84 x 8400, fp32, no NMS."""
     from ultralytics import YOLO as Y
-    p = Y(weights).export(format="onnx", imgsz=640, opset=opset, dynamic=False, half=False,
-                          simplify=True, nms=False, batch=1)
+    p = Y(weights_path).export(format="onnx", imgsz=640, opset=opset, dynamic=False, half=False,
+                               simplify=True, nms=False, batch=1)
     shutil.copy(p, out)
-    print("сохранено:", out)
+    print("saved:", out)
 
 
-# ---------------------------------------------------------------- проверка на ролике
+# ---------------------------------------------------------------- check on a video
 def video(onnx_paths, path, step, conf):
-    """Сколько кадров (каждый step-й) с хотя бы одной машиной conf >= conf и шириной < 0.9 кадра."""
+    """How many frames (every step-th) have at least one car with conf >= conf and width < 0.9 frame."""
     import cv2
     import numpy as np
     import onnxruntime as ort
     for mp in onnx_paths:
-        sess = ort.InferenceSession(mp, providers=["CoreMLExecutionProvider", "CPUExecutionProvider"])
+        sess = ort.InferenceSession(mp, providers=ort.get_available_providers())
         inp = sess.get_inputs()[0]
         dtype = np.float16 if "float16" in inp.type else np.float32
         cap = cv2.VideoCapture(path)
@@ -367,46 +373,47 @@ def video(onnx_paths, path, step, conf):
             bw = out[:, 2] / r
             n += 1
             hit += bool(((s >= conf) & (bw < 0.9 * w)).any())
-        print(f"{os.path.basename(mp)}: {hit}/{n} кадров с машиной, {np.median(ms[3:]):.1f} мс/кадр")
+        print(f"{os.path.basename(mp)}: {hit}/{n} frames with a car, {np.median(ms[3:]):.1f} ms/frame")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["download", "prep", "train", "eval", "export", "video", "all"])
-    ap.add_argument("--train-n", type=int, default=10000, help="кадров в train (0 = весь официальный train, 69 863)")
-    ap.add_argument("--night-share", type=float, default=0.4, help="минимальная доля ночи в train")
-    ap.add_argument("--val-n", type=int, default=0, help="кадров в отложенной проверке (0 = все 10 000)")
-    ap.add_argument("--train-val-n", type=int, default=500, help="кадров для проверки во время обучения")
+    ap.add_argument("--arch", default="yolo11s", help="yolo11n / yolo11s / yolo11m ...")
+    ap.add_argument("--train-n", type=int, default=10000, help="frames in train (0 = all official train, 69 863)")
+    ap.add_argument("--night-share", type=float, default=0.4, help="minimum share of night in train")
+    ap.add_argument("--val-n", type=int, default=0, help="frames in the held-out check (0 = all 10 000)")
+    ap.add_argument("--train-val-n", type=int, default=500, help="frames for the check during training")
     ap.add_argument("--epochs", type=int, default=8)
     ap.add_argument("--hours", type=float, default=0,
-                    help="ограничить обучение по времени (ч): Ultralytics сам пересчитает число эпох и расписание lr")
+                    help="time limit for training (h): Ultralytics recomputes epochs and the lr schedule")
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--imgsz", type=int, default=640)
-    ap.add_argument("--device", default="mps", help="mps (Mac), 0 (CUDA), cpu")
+    ap.add_argument("--device", default="0", help="0 (CUDA), mps (Mac), cpu")
     ap.add_argument("--workers", type=int, default=8)
-    ap.add_argument("--resume", action="store_true", help="продолжить прерванное обучение")
-    ap.add_argument("--weights", nargs="*", help="веса для eval/export (по умолчанию best.pt)")
-    ap.add_argument("--onnx", nargs="*", default=[os.path.join(ROOT, "models", "yolo11s_fp32.onnx"),
-                                                   os.path.join(ROOT, "models", "yolo11s_bdd.onnx")])
-    ap.add_argument("--out", default=os.path.join(ROOT, "models", "yolo11s_bdd.onnx"))
+    ap.add_argument("--resume", action="store_true", help="continue an interrupted training")
+    ap.add_argument("--weights", nargs="*", help="weights for eval/export (default best.pt)")
+    ap.add_argument("--onnx", nargs="*")
+    ap.add_argument("--out", help="exported ONNX (default models/<arch>_bdd.onnx)")
     ap.add_argument("--opset", type=int, default=17)
-    ap.add_argument("--video-path", default=os.path.join(ROOT, "data", "videos", "ca_wrong_way_pd.webm"))
+    ap.add_argument("--video-path", default=os.path.join(ROOT, "data", "videos", "krakow_peds.mp4"))
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-    best = os.path.join(RUNS, RUN_NAME, "weights", "best.pt")
+    best = os.path.join(RUNS, f"{a.arch}_bdd", "weights", "best.pt")
+    out = a.out or os.path.join(ROOT, "models", f"{a.arch}_bdd.onnx")
 
     if a.cmd in ("download", "all"):
-        download()
+        download(a.arch)
     if a.cmd in ("prep", "all"):
         prep(a.train_n, a.night_share, a.val_n, a.train_val_n, a.seed)
     if a.cmd in ("train", "all"):
-        best = train(a.epochs, a.batch, a.device, a.workers, a.imgsz, WEIGHTS, a.resume, a.hours)
+        best = train(a.arch, a.epochs, a.batch, a.device, a.workers, a.imgsz, a.resume, a.hours)
     if a.cmd in ("eval", "all"):
-        evaluate(a.weights or [WEIGHTS, best], a.device, a.batch)
+        evaluate(a.weights or [weights(a.arch), best], a.device, a.batch)
     if a.cmd in ("export", "all"):
-        export((a.weights or [best])[0], a.out, a.opset)
+        export((a.weights or [best])[0], out, a.opset)
     if a.cmd in ("video", "all"):
-        video(a.onnx, a.video_path, 3, 0.3)
+        video(a.onnx or [os.path.join(ROOT, "models", "yolo11s_fp32.onnx"), out], a.video_path, 3, 0.3)
 
 
 if __name__ == "__main__":

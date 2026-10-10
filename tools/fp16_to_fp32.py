@@ -1,7 +1,7 @@
-"""Переводит ONNX-модель из float16 в float32: на CPU float32 работает заметно быстрее.
+"""Convert an ONNX model from float16 to float32: on CPU float32 is noticeably faster.
 
-Пакет onnx здесь не используется (его DLL блокирует Smart App Control) — читаем protobuf
-чистым Python через сгенерированный onnx_ml_pb2.py.
+The onnx package is not used here (on some Windows machines Smart App Control blocks its DLL) - the
+protobuf is read in pure Python through the generated onnx_ml_pb2.py.
 
     set PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
     python tools/fp16_to_fp32.py models/yolo11n.onnx models/yolo11n_fp32.onnx
@@ -25,7 +25,7 @@ def load_pb2():
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             return mod
-    raise SystemExit("Не найден onnx/onnx_ml_pb2.py — выполните: pip install onnx")
+    raise SystemExit("onnx/onnx_ml_pb2.py not found - run: pip install onnx")
 
 
 def convert_tensor(t):
@@ -61,7 +61,7 @@ def main(src, dst):
             vi.type.tensor_type.elem_type = FLOAT
     with open(dst, "wb") as f:
         f.write(model.SerializeToString())
-    print(f"{src} -> {dst}: переведено тензоров: {n}")
+    print(f"{src} -> {dst}: tensors converted: {n}")
 
 
 if __name__ == "__main__":
