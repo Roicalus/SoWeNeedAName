@@ -8,7 +8,7 @@ FONT = cv2.FONT_HERSHEY_DUPLEX
 
 
 def _text(img, text, org, scale, color, thick=2):
-    cv2.putText(img, text, org, FONT, scale, (0, 0, 0), thick + 3, cv2.LINE_AA)   # обводка
+    cv2.putText(img, text, (org[0] + 2, org[1] + 2), FONT, scale, (0, 0, 0), thick, cv2.LINE_AA)   # тень: у толстой обводки другой шаг букв
     cv2.putText(img, text, org, FONT, scale, color, thick, cv2.LINE_AA)
 
 
@@ -34,6 +34,9 @@ def draw(frame, res, show_corridor=True, proc_fps=None, recording=False):
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, max(2, int(3 * s)))
         if res.distance is not None and not res.oncoming:
             _text(frame, f"{res.distance:.0f} m", (x1, max(y1 - int(10 * s), 20)), 0.8 * s, color)
+    for d in res.crashed:                       # авария у любой машины — всегда красным
+        x1, y1, x2, y2 = map(int, d.box)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLORS[3], max(3, int(4 * s)))
     for p in res.peds:
         x1, y1, x2, y2 = map(int, p.box)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, max(2, int(3 * s)))

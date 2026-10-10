@@ -97,6 +97,28 @@ def test_parked_car_passing_ignored():
     assert not seen(out, "ttc") and not seen(out, "closing")
 
 
+def test_crash_in_other_lane_detected():
+    """Машина в соседнем ряду «взлетает»: рамка уходит вверх и вытягивается, ширина та же."""
+    frames = []
+    for i in range(90):
+        k = max(0, i - 60) / FPS                  # с 2-й секунды — авария
+        w, x1, y2 = 0.09 * W, 0.75 * W, 0.62 * H - 1.0 * 0.07 * H * k / 0.3
+        h = 0.8 * w * (1 + 2.0 * k)
+        frames.append([Detection((x1, y2 - h, x1 + w, y2), 2, 7), car(0.3, 0.05, tid=8, bottom=0.6)])
+    out = run(frames)
+    assert not any("crash" in kinds for kinds, _ in out[:60]), "до аварии тревоги быть не должно"
+    assert seen(out[60:], "crash"), "авария соседней машины должна вызывать тревогу"
+
+
+def test_car_driving_away_not_crash():
+    """Машина уезжает вперёд: низ рамки поднимается, но рамка сужается — это не авария."""
+    frames = []
+    for i in range(90):
+        width = 0.2 * math.exp(-0.8 * i / FPS)
+        frames.append([car(0.75, width, tid=3, bottom=0.45 + 1.2 * width)])
+    assert not seen(run(frames), "crash")
+
+
 def test_tracker_keeps_id():
     tr = Tracker()
     ids = set()

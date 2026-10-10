@@ -2,3 +2,4 @@ onnxruntime
 opencv-python
 numpy
 pyttsx3
+imageio-ffmpeg

@@ -7,3 +7,6 @@ snaps/
 data/videos/
 eval_*.csv
 runs/
+debug/
+data/nexar/
+.DS_Store

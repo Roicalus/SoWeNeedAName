@@ -1,11 +1,15 @@
 """Голосовые предупреждения в отдельном потоке, чтобы не тормозить обработку видео.
 
+Перед фразой звучит короткий сигнал (sounds/beep.wav, для критичного — beep_crit.wav, см. beeps.py):
+водитель реагирует на него раньше, чем дослушает фразу.
 Если в папке sounds/ лежит <тип>.wav (см. make_sounds.py), играем его — это быстрее и надёжнее.
 Иначе говорим через pyttsx3.
 """
 import itertools
 import os
 import queue
+import shutil
+import subprocess
 import threading
 import time
 
@@ -15,6 +19,26 @@ try:
     import winsound
 except ImportError:      # не Windows
     winsound = None
+
+# проигрыватель .wav вне Windows: macOS — afplay, Linux — aplay
+PLAYER = shutil.which("afplay") or shutil.which("aplay")
+
+
+def play_wav(path):
+    """Проиграть .wav и дождаться конца. False — если играть нечем или файла нет."""
+    if not os.path.exists(path):
+        return False
+    if winsound:
+        winsound.PlaySound(path, winsound.SND_FILENAME)
+    elif PLAYER:
+        subprocess.run([PLAYER, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        return False
+    return True
+
+
+def beep_file(level, sounds_dir="sounds"):
+    return os.path.join(sounds_dir, "beep_crit.wav" if level >= C.BEEP_CRIT_LEVEL else "beep.wav")
 
 
 def make_engine():
@@ -56,9 +80,9 @@ class Voice:
                 continue
             wav = os.path.join(self.sounds_dir, f"{alert.kind}.wav")
             try:
-                if winsound and os.path.exists(wav):
-                    winsound.PlaySound(wav, winsound.SND_FILENAME)
-                else:
+                if C.BEEP:
+                    play_wav(beep_file(alert.level, self.sounds_dir))
+                if not play_wav(wav):
                     engine = engine or make_engine()
                     engine.say(alert.voice)
                     engine.runAndWait()
