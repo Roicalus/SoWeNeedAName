@@ -9,6 +9,7 @@
 быть реже кадров, но никогда не отстаёт от дороги.
 """
 import argparse
+import os
 import threading
 import time
 
@@ -18,6 +19,7 @@ import config as C
 import ui
 from behavior import BehaviorEngine, FrameResult
 from detector import Detector
+from lanes import LaneDetector
 from recorder import EventRecorder
 from voice import Voice
 
@@ -27,6 +29,9 @@ class Analyzer:
 
     def __init__(self, model):
         self.det = Detector(model)
+        self.lanes = LaneDetector() if os.path.exists(C.LANE_MODEL) else None
+        if self.lanes is None:
+            print(f"Нет модели полос {C.LANE_MODEL} — полоса по трапеции (см. lanes.py)")
         self.engine = BehaviorEngine()
         self.cond = threading.Condition()
         self.pending = None               # (t, кадр), ещё не обработанный
@@ -54,7 +59,10 @@ class Analyzer:
                 (t, frame), self.pending = self.pending, None
                 det, engine = self.det, self.engine
             tic = time.perf_counter()
-            res = engine.update(t, frame.shape[1], frame.shape[0], det(frame), frame)
+            self.n = getattr(self, "n", 0) + 1
+            # разметка меняется медленно — на слабом железе её можно искать не на каждом анализе
+            lanes = self.lanes.detect(frame) if self.lanes and self.n % C.LANE_EVERY == 0 else None
+            res = engine.update(t, frame.shape[1], frame.shape[0], det(frame), frame, lanes)
             dt = max(time.perf_counter() - tic, 1e-6)
             self.rate = 1 / dt if self.rate is None else 0.9 * self.rate + 0.1 / dt
             self.result = res

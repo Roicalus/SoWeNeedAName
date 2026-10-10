@@ -119,6 +119,38 @@ def test_car_driving_away_not_crash():
     assert not seen(run(frames), "crash")
 
 
+def test_cut_in_detected():
+    """Машина из соседней полосы (смещение 2 ширины, ~9 м впереди) за секунду перестраивается перед нами."""
+    frames = []
+    for i in range(60):
+        k = min(max((i / FPS - 0.7) / 1.0, 0), 1)             # с 0.7 с — перестроение за 1 с
+        width = 0.14
+        X = 2.0 * (1 - k)                                      # смещение в ширинах машины
+        frames.append([car(0.5 + X * width, width, tid=4, bottom=0.62 + width),
+                       car(0.2, 0.05, tid=5, bottom=0.55), car(0.8, 0.05, tid=6, bottom=0.55)])
+    out = run(frames)
+    assert seen(out[:45], "cutin") or seen(out[:45], "crossing"), "подрезание должно ловиться до въезда в полосу"
+
+
+def test_neighbor_lane_steady_not_cut_in():
+    """Машина спокойно едет в соседней полосе — не подрезание."""
+    frames = [[car(0.5 + 2.0 * 0.12, 0.12, tid=4, bottom=0.74), car(0.2, 0.05, tid=5, bottom=0.55),
+               car(0.8, 0.05, tid=6, bottom=0.55)] for _ in range(90)]
+    out = run(frames)
+    assert not any(kinds & {"cutin", "crossing"} for kinds, _ in out)
+
+
+def test_pedestrian_stepping_into_lane():
+    """Пешеход быстро выходит с обочины на нашу полосу — предупреждаем раньше, чем он на ней."""
+    frames = []
+    for i in range(30):
+        x = 900 - 12 * i                                       # ~1.3 м/с к центру при росте 160 px
+        frames.append([Detection((x, 400, x + 60, 560), C.PERSON_CLASS, 7)])
+    out = run(frames)
+    first = next(i for i, (kinds, _) in enumerate(out) if "ped" in kinds)
+    assert first < 25, f"пешеход замечен поздно (кадр {first})"
+
+
 def test_tracker_keeps_id():
     tr = Tracker()
     ids = set()

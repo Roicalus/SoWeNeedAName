@@ -29,7 +29,9 @@ MATCH = {
     "closing": {"ttc", "closing"},
     "weave": {"weave"},
     "ped": {"ped"},
-    "crash": {"crash", "ttc", "closing"},
+    "crash": {"crash", "ttc", "closing", "danger"},
+    "cutin": {"cutin", "crossing", "closing", "ttc", "danger"},
+    "crossing": {"crossing", "cutin", "closing", "ttc", "danger"},
     "close": {"close", "closing", "ttc"},
     "any": set(C.ALERTS),
 }

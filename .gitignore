@@ -10,3 +10,12 @@ runs/
 debug/
 data/nexar/
 .DS_Store
+data/dada/
+data/bdd/
+models/lanes_src/
+data/bdd_det/
+.venv-train/
+cache/
+models/ufldv2_*.onnx
+models/yolo11s.onnx
+models/yolo11n_fp32.onnx

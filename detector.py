@@ -12,11 +12,19 @@ from behavior import Detection
 from tracker import Tracker
 
 
+def providers():
+    """Ускорители по порядку предпочтения: CoreML (Mac, Neural Engine/GPU), CUDA, DirectML, затем CPU."""
+    avail = ort.get_available_providers()
+    return [p for p in ("CoreMLExecutionProvider", "CUDAExecutionProvider", "DmlExecutionProvider")
+            if p in avail and p in C.ORT_ACCEL] + ["CPUExecutionProvider"]
+
+
 class Detector:
     def __init__(self, model=C.MODEL):
         so = ort.SessionOptions()
         so.intra_op_num_threads = C.ORT_THREADS
-        self.sess = ort.InferenceSession(model, so, providers=["CPUExecutionProvider"])
+        so.log_severity_level = 3                       # без предупреждений CoreML о разбиении графа
+        self.sess = ort.InferenceSession(model, so, providers=providers())
         inp = self.sess.get_inputs()[0]
         self.input_name, self.size = inp.name, inp.shape[2]
         self.dtype = np.float16 if "float16" in inp.type else np.float32

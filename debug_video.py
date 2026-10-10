@@ -12,7 +12,9 @@
   рамки  — все треки: #id, класс, статус. Машины: LEAD — машина впереди, cand — кандидат,
            lane — вне трапеции полосы, off N.Nw — смещение в своих ширинах больше порога,
            side — видна сбоку, edge — у края кадра, hood — капот. Пешеходы: PED, far, lane, off N.Nm.
-  линии  — трапеция полосы (белая), HOOD_Y (синяя), PED_MIN_Y (голубая пунктир).
+  полосы — своя полоса залита цветом уровня опасности (по разметке; без неё — белая трапеция),
+           HOOD_Y — синяя линия (ниже — капот).
+  угрозы — рамка цвета уровня, тип и дистанция; стрелка — куда участник сместится через секунду.
   слева  — время, TTC, дистанция, скорость сближения, ширина рамки, виляние.
   снизу  — графики за последние --window секунд: TTC (пороги 3 и 1.5 с), ширина рамки,
            амплитуда виляния; полосы по типам предупреждений: тонкая — условие выполнено (сырое),
@@ -36,13 +38,15 @@ import config as C
 import ui
 from behavior import BehaviorEngine, corridor_polygon
 from detector import Detector
+from lanes import LaneDetector
 from evaluate import VIDEO_EXT, stem
 from voice import beep_file
 
 CLS = {**C.VEHICLE_CLASSES, C.PERSON_CLASS: "person"}
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 GRAY, WHITE = (150, 150, 150), (255, 255, 255)
-KIND_COLOR = {"ttc": (0, 0, 255), "crash": (0, 0, 200), "closing": (0, 140, 255), "weave": (255, 0, 255),
+KIND_COLOR = {"danger": (0, 90, 255), "ttc": (0, 0, 255), "crash": (0, 0, 200), "wrongway": (60, 0, 255), "cutin": (0, 180, 255),
+              "crossing": (0, 120, 255), "closing": (0, 140, 255), "weave": (255, 0, 255),
               "ped": (0, 220, 255), "brakelight": (80, 80, 255), "close": (255, 200, 0)}
 
 
@@ -60,24 +64,20 @@ def dashed_hline(img, y, color, dash=12):
 def draw_scene(frame, res, t, fi, k=1.0):
     """k — во сколько раз кадр уменьшен относительно исходного (рамки в исходных пикселях)."""
     H, W = frame.shape[:2]
-    cv2.polylines(frame, [corridor_polygon(W, H)], True, WHITE, 1, cv2.LINE_AA)
+    if not ui.draw_lanes(frame, res.lanes, res.level):
+        cv2.polylines(frame, [corridor_polygon(W, H)], True, WHITE, 1, cv2.LINE_AA)
     cv2.line(frame, (0, int(C.HOOD_Y * H)), (W, int(C.HOOD_Y * H)), (255, 120, 0), 1, cv2.LINE_AA)
-    dashed_hline(frame, int(C.PED_MIN_Y * H), (255, 255, 0))
 
     lead_id = res.lead.tid if res.lead else None
-    crashed = {d.tid for d in res.crashed}
-    for d, status in res.tracks:
+    threat_ids = {th.det.tid for th in res.threats}
+    for d, status in res.tracks:                  # все треки: #id, класс, u (полос), боковая скорость
         x1, y1, x2, y2 = (int(v * k) for v in d.box)
-        if d.tid in crashed:
-            status, color, th = status + " CRASH", (0, 0, 255), 4
-        elif d.tid == lead_id:
-            status, color, th = "LEAD", ui.COLORS[res.level], 3
-        elif status in ("cand", "PED"):
-            color, th = (0, 255, 255), 2
-        else:
-            color, th = GRAY, 1
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, th)
-        text(frame, f"#{d.tid} {CLS.get(d.cls, d.cls)} {status}", (x1, max(y1 - 4, 12)), 0.42, color)
+        color = (0, 200, 0) if d.tid == lead_id else GRAY
+        if d.tid not in threat_ids:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2 if d.tid == lead_id else 1)
+        tag = "LEAD " if d.tid == lead_id else ""
+        text(frame, f"#{d.tid} {CLS.get(d.cls, d.cls)} {tag}{status}", (x1, y2 + 14), 0.4, color)
+    ui.draw_threats(frame, res, k, 0.5)
 
     # левая панель с числами
     lines = [f"t {t:7.2f}s  frame {fi}"]
@@ -94,14 +94,15 @@ def draw_scene(frame, res, t, fi, k=1.0):
             lines.append(f"weave amp {res.weave[0]:.2f} (>{C.WEAVE_REL_STD})  rev {res.weave[1]} (>={C.WEAVE_MIN_REVERSALS})")
     else:
         lines.append("lead: none")
+    lines.append("lanes: " + ("yes" if res.lanes is not None else "no (trapezoid)") + f"   risk {res.risk:.2f}")
     lines.append("raw: " + (" ".join(sorted(res.raw)) or "-"))
     lines.append("ALERT: " + (" ".join(sorted(a.kind for a in res.alerts)) or "-"))
     box_h = 18 * len(lines) + 10
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (330, box_h), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-    for k, s in enumerate(lines):
-        text(frame, s, (8, 20 + 18 * k), 0.48, (0, 0, 255) if s.startswith("ALERT: ") and res.alerts else WHITE)
+    for n, s in enumerate(lines):
+        text(frame, s, (8, 20 + 18 * n), 0.48, (0, 0, 255) if s.startswith("ALERT: ") and res.alerts else WHITE)
 
     if res.top:                                   # то, что видит водитель
         text(frame, res.top.screen, (W // 2 - 120, 50), 1.2, ui.COLORS[res.level], 3)
@@ -110,7 +111,7 @@ def draw_scene(frame, res, t, fi, k=1.0):
 
 def draw_panel(W, hist, t, window, events):
     """Графики за последние window секунд. hist: [(t, ttc, w, weave_amp, raw, active)]."""
-    ph = 305
+    ph = 375
     panel = np.full((ph, W, 3), 25, np.uint8)
     x0, x1 = 90, W - 10
     tx = lambda tt: int(x1 - (t - tt) / window * (x1 - x0))
@@ -258,7 +259,8 @@ def run(path, det, args):
         if end and t > end:
             break
         if res is None or n % stride == 0:
-            res = engine.update(t, frame.shape[1], frame.shape[0], det(frame), frame)
+            lanes = det.lanes.detect(frame) if det.lanes else None
+            res = engine.update(t, frame.shape[1], frame.shape[0], det(frame), frame, lanes)
             w = (res.lead.box[2] - res.lead.box[0]) / frame.shape[1] if res.lead else None
             active = {a.kind for a in res.alerts}
             hist.append((t, res.ttc, w, res.weave[0] if res.weave else None, set(res.raw), active))
@@ -314,6 +316,7 @@ def main():
     ap.add_argument("--width", type=int, default=1280, help="ширина выходного видео")
     ap.add_argument("--window", type=float, default=15, help="сколько секунд истории на графиках")
     ap.add_argument("--out", default="debug", help="папка для результатов")
+    ap.add_argument("--no-lanes", action="store_true", help="без распознавания разметки (трапеция)")
     ap.add_argument("--no-audio", action="store_true", help="без звуковой дорожки")
     ap.add_argument("--model", default=C.MODEL)
     args = ap.parse_args()
@@ -325,6 +328,7 @@ def main():
     if not paths:
         raise SystemExit(f"Нет роликов: {args.videos}")
     det = Detector(args.model)
+    det.lanes = None if args.no_lanes or not os.path.exists(C.LANE_MODEL) else LaneDetector()
     for p in paths:
         print(p)
         run(p, det, args)
