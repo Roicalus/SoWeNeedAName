@@ -1,0 +1,9 @@
+__pycache__/
+.venv/
+venv/
+*.pt
+events/
+snaps/
+data/videos/
+eval_*.csv
+runs/
