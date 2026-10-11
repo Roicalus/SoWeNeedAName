@@ -1,112 +1,52 @@
-# Передача проекта «Второй пилот» (для нового аккаунта / нового чата)
+# Handoff — Co-pilot (state of 11 October 2026, final day of WIUT Hackathon 2026)
 
-Обновлено: 2026-10-10, после версии 2 (коммит «Версия 2: полосы, угрозы…»). Хакатон, 20 часов.
-Этот файл — всё, что нужно знать из прошлых чатов. Подробности по коду — `README.md`.
+Everything needed to continue in a new chat or on another PC. Details of the code: `README.md`.
 
-## 1. Идея
-Умный видеорегистратор с экраном и динамиком — «второй пилот». Смотрит на дорогу и **голосом
-предупреждает** водителя об опасностях: машина впереди резко тормозит, подрезают, кто-то
-пересекает путь, пешеход/велосипедист выходит на полосу, авария впереди, встречная по нашей полосе.
-Плюс автозапись ролика опасного момента. Прототип на ноутбуке, видео с регистраторов вместо железа.
-Клиенты: водители без ADAS, автопарки такси/доставки, страховые. Конкуренты: Mobileye, Garmin,
-Samsara, Lytx, Nauto. Отличие: анализ поведения ВСЕХ участников, голос на местном языке, дешёвое железо.
+## The product
+A driver assistant for any dashcam / phone / head unit: it watches the road and *quietly hints* before
+things get dangerous. Three levels: green (attention), yellow (possible risk), red (danger). It is a
+helper, not an alarm: people on the pavement, parked cars and traffic we are not driving into are ignored;
+hints are rationed. Mode for the jury: **Startup** (drivers without ADAS, taxi/delivery fleets; OEM head
+units of BYD / Toyota as a channel).
 
-## 2. Пожелания пользователя (как работать)
-- Общение и комментарии в коде — на русском. Числа и результаты — честно (что не проверено — так и писать).
-- Коммитить, когда просят; push на GitHub (`origin = github.com/Roicalus/SoWeNeedAName`) с этого Mac
-  не работает — не настроен вход (нужен токен GitHub или GitHub Desktop, делает пользователь).
-- Пользователь хочет: модель, которая видит полосы и поведение машин в них, предупреждает без
-  запаздывания, понятный вид угроз на экране, и проверку/обучение на реальных роликах аварий
-  (высокий и средний риск, плотный городской трафик). Датасеты, которые он сам предложил:
-  DADA-2000 (github.com/JWFangit/LOTVS-DADA) и BDD100K (github.com/bdd100k/bdd100k).
+## How the user wants it
+* Communication in Russian; code, comments, README, site and voice in English.
+* Honest numbers only; known failures stated.
+* Demo videos must stay as rendered by `debug_video.py --demo`; the site offers two views: Driver /
+  How the system sees it. Site style follows https://github.com/Roicalus/wiut-traffic-site.
+* Commits go to https://github.com/Roicalus/SoWeNeedAName (push via GitHub Desktop — the CLI has no
+  credentials on this PC).
 
-## 3. Окружение (MacBook, Apple M4)
-- Только системный Python 3.9 (`/usr/bin/python3`), brew нет. Код совместим с 3.9 (`from __future__ import annotations`).
-- `.venv` (в git не входит): `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
-  onnxruntime 1.19 с **CoreMLExecutionProvider** — даёт ускорение в 3–5 раз (detector.providers()).
-- `.venv-train` — отдельно для PyTorch/ultralytics (только для `tools/train_detector.py`).
-- Голос на Mac: `afplay` (voice.py), новые фразы записаны `say -v Milena` → `afconvert` в 22050 Гц моно.
-  Старые фразы (ttc, closing, weave, ped, close, brakelight) — голос Windows Irina.
-- Изначально проект писался на Windows-ноутбуке (Intel Core 3 100U, без GPU, Smart App Control
-  блокирует PyTorch) — поэтому всё на ONNX Runtime без torch.
+## This PC (Windows 11, i5-10400F, 32 GB, RTX 4070 Ti 12 GB)
+* Repo: `E:\games\SoWeNeedAName\SoWeNeedAName` (E: is a **hard disk** — slow for 70k small files).
+* Python venv: `C:\Users\user\Desktop\SoWeNeedAName-main\.venv` (torch cu128, ultralytics, onnxruntime-directml,
+  lightgbm, yt-dlp). Run tools with that python.
+* Git: `C:\Users\user\AppData\Local\GitHubDesktop\app-3.6.6\resources\app\git\cmd\git.exe`.
+* Detector dataset (YOLO format, paths rewritten): `D:\SoWeNeedAName_data\bdd_yolo` (SSD).
+* Long jobs must be started detached (`Invoke-CimMethod Win32_Process Create`), otherwise they die with the shell.
 
-## 4. Что есть в коде (версия 2)
-| Модуль | Суть |
+## Data on disk (not in git)
+| Path | What |
 |---|---|
-| `detector.py` | YOLO ONNX (по умолчанию `models/yolo11s_fp32.onnx`, COCO), letterbox, NMS, трекер ByteTrack-стиль (`tracker.py`) |
-| `lanes.py` | Полосы: UFLDv2 CULane ResNet-18 (ONNX 825 МБ, **не в git**), сглаживание, параболическая аппроксимация линий, своя полоса, `lane_pos(x,y)` |
-| `behavior.py` | Для КАЖДОГО участника: `u` — положение в полосах (0 — центр нашей, ±1 — соседняя; по разметке или по геометрии рамки), боковая скорость с поправкой на свой поворот (медиана сдвига рамок), TTC по росту рамки (по высоте — у машин боком и людей), дистанция (у машины боком — по высоте рамки, т.к. ширина = длина машины). Угрозы: `ttc/closing` (в полосе), `cutin`, `crossing` (машина видна боком), `wrongway` (встречная в нашей полосе, только при видимой разметке), `ped` (в полосе ближе 12 м или идёт к полосе), `crash` (рамка «взлетает»), `weave`, `close` (только при сближении). Подтверждение с гистерезисом (`RAW_GAP`, `ALERT_HOLD`). Отдаёт `res.features` для модели риска |
-| `risk.py` | Модель риска (логистическая регрессия на признаках + максимум за 0.5 с), `models/risk.json`; **ещё не обучена** — без файла выключена |
-| `ui.py` | Своя полоса залита цветом уровня, рамка+тип+дистанция у каждой угрозы, стрелка движения |
-| `voice.py`, `beeps.py` | Короткий сигнал (beep / beep_crit) сразу, потом фраза; анти-спам |
-| `debug_video.py` | Отладочное видео со звуком: все треки (u, боковая скорость), полосы, угрозы, графики TTC/ширины/виляния, полосы «сырое/подтверждённое» по типам |
-| `main.py` | Живое приложение (окно, голос, автозапись), анализ в фоновом потоке |
-| `tools/cache_tracks.py` | Один прогон детектора+полос по роликам → `cache/*.npz` (не в git) |
-| `tools/replay.py` | Логика по кэшу за секунды: поймано / «до аварии» (медиана) / ложные в минуту; `--set ИМЯ=знач` для подбора порогов |
-| `tools/train_risk.py` | Обучение модели риска на DADA (tune) + BDD, проверка на DADA (test) |
-| `tools/train_detector.py` | Дообучение YOLO11s на BDD100K (ночь), выход — замена ONNX один в один (84×8400, COCO-классы) |
-| `tools/get_dada.py`, `get_bdd_videos.py`, `get_nexar.py` | Загрузчики данных (ниже) |
-Тесты: `.venv/bin/python test_behavior.py` → 16/16.
+| `data/dada/videos`, `labels.csv` | 1 714 DADA-2000 crash clips (10 fps, tune/test split) |
+| `data/bdd` | 150 BDD100K videos of normal driving |
+| `data/bdd_det` | BDD100K images zip + metadata (detector training) |
+| `data/highway` | 3 long highway drives from Wikimedia (CC BY 3.0): Tehran, VW POV, Austria→Slovenia (first 300 MB) |
+| `data/videos` | Kraków (CC BY), German city (CC0), TeslaCam crash (PD), Tashkent reel |
+| `data/reels` | 7 Instagram clips + 20 labelled crops — internal only, never publish (faces/plates) |
+| `cache*/` | detector+lanes+crosswalk+flow caches for `tools/replay.py` |
+| `models/ufldv2_culane_res18_320x1600.onnx` | lane model (825 MB) |
+| `runs/bdd/yolo11m_bdd*` | detector training runs |
 
-## 5. Данные — откуда и грабли
-| Набор | Откуда сейчас | Грабли |
-|---|---|---|
-| 5 тестовых роликов (`data/videos`) | Wikimedia Commons, ссылки в README «Данные» | Краков — первые 60 МБ (`curl -r 0-62914559`) |
-| **DADA-2000** (аварии, разметка: начало опасности, кадр аварии, тип, день/ночь) | кадры: HF `yumuxie/dada` (`<тип>/<номер>/images/0001.jpg`), разметка CSV: HF `DBatinic/DADA2000`; описания типов — `data/dada/dada_labels.xlsx` | Google Drive оригинала (53 ГБ, split zip) упирается в квоту. HF анонимно: **3000 файлов / 5 мин** → загрузчик берёт каждый 3-й кадр и окно [опасность−6 с, авария+1 с], ждёт по 429. 240 роликов ≈ 13.5 тыс. кадров ≈ 40–60 мин. Скачано ~60 %, ролики (`data/dada/videos`) ещё не собраны — просто перезапустить, готовые кадры пропускаются |
-| **BDD100K** (обычная езда, NY/SF, день/ночь) | видео: HF `linxxx3/bdd100k_videos` — побайтовая копия zip 1.8 ТБ; `get_bdd_videos.py` вырезает ролики Range-запросами (файлы STORED). Для обучения детектора: кадры HF `Xing1210/bdd100k`, рамки HF `dronefreak/BDD100K`, день/ночь `dronefreak/BDD100K-Period-Classification` | официальный dl.cv.ethz.ch и doc.bdd100k.com мертвы (NXDOMAIN). 60 роликов уже в `data/bdd` |
-| Nexar collision (1500, много Нью-Йорка) | HF `nexar-ai/nexar_collision_prediction` | gated: нужно принять условия на HF и токен (`HF_TOKEN=… tools/get_nexar.py`) |
-| Модель полос | PINTO model zoo 324 (wasabi S3, 2.9 ГБ tar) — команда в начале `lanes.py` | в git нельзя (825 МБ) |
-| YOLO | HF `unity/inference-engine-yolo` (float16) → `tools/fp16_to_fp32.py`; `yolo11s_fp32.onnx` уже в git | float16 на CPU в 3 раза медленнее |
+## What was learned
+* A learned filter of alerts trained on DADA (China) vs BDD (US) learns the dataset, not danger — not shipped.
+* Video-only own speed is unreliable (hood, reflections); yaw from far background flow is usable.
+* Camera mounting varies a lot: horizon/hood are auto-calibrated per camera (behavior._calibrate).
+* Floating-point comparison in alert confirmation silently dropped short real alerts — fixed with an epsilon.
+* Parked cars while turning were the main false-alarm source — yaw-dependent thresholds + world-motion checks.
 
-## 6. Результаты и выводы (что пробовали)
-- v1 (только машина впереди, трапеция): Краков 0.8/мин, Германия 0; на опасных роликах — ничего.
-- Авария у соседней машины («взлёт» рамки: подъём > 0.6 высоты/с при неизменной ширине + рост h/w,
-  качка вычитается медианой): ловит Теслу на 15.6 с, 0 ложных на 7 мин спокойной езды.
-- **Подрезание без разметки** (по сдвигу рамок в кадре) — десятки ложных на поворотах; с разметкой
-  и поправкой на свой поворот — лучше. Ловит подрезание в Тесле (10.7 с при мягких порогах).
-- Ложные «пересечения» были из-за дистанции по ширине у машин боком (занижение в 2–3 раза) и
-  далёких машин на перекрёстках → исправлено: дистанция по высоте + требуем TTC ≤ 3 с или ≤ 10 м.
-- Виляние по разметке — хуже (дрожание линий > порога), оставлено по рамке.
-- Ночь: COCO-YOLO11n видит машину в 16/282 кадрах ночного ролика, 11s — 47/282; яркость/CLAHE не помогают
-  → нужно дообучение на ночных кадрах BDD.
-- Сейчас (v2, по кэшу): BDD 27 роликов — 4.6 предупреждений/мин (часть — реальные средние риски:
-  велосипедисты, пешеходы на переходе), Краков 6/мин, Германия 2/мин. **Много** — пороги новых правил
-  подобраны только по ложным на BDD, без проверки поимки на DADA.
-- Не ловится: фургон наперерез с велосипеда (pl_…), встречная ночью (ca_…), отлетевшее колесо (нет класса).
-
-## 7. Что делать дальше (по порядку, с командами)
-```bash
-.venv/bin/python tools/get_dada.py --per-group 50          # докачать DADA и собрать ролики + labels.csv
-.venv/bin/python tools/get_bdd_videos.py --n 60            # если data/bdd пуст
-.venv/bin/python tools/cache_tracks.py data/videos data/bdd data/dada/videos
-.venv/bin/python tools/replay.py                           # поймано / до аварии / ложные по группам и день/ночь
-.venv/bin/python tools/replay.py --split tune --set CUTIN_MIN_SPEED=0.5 CUTIN_TTC=4    # подбор порогов
-.venv/bin/python tools/train_risk.py                       # модель риска → models/risk.json (включится сама)
-.venv-train/bin/python tools/train_detector.py all --train-n 10000 --epochs 8 --device mps   # ночь (лучше на NVIDIA: --device 0)
-.venv/bin/python debug_video.py data/videos/us_tesla_crash_pd.webm      # посмотреть глазами
-```
-Цель настройки: на DADA test поймать ≥ 60–70 % опасностей заранее (≥ 1 с до аварии) при ≤ 1–2 средних
-и ~0 критичных ложных в минуту на BDD. Потом: живые голоса в `sounds/*.wav`, демо-видео, питч
-(крючок → решение → демо → как работает → цифры → рынок). Статистику ДТП — только из реальных источников.
-
-## 8. Установка с нуля (новый ПК)
-```bash
-git clone https://github.com/Roicalus/SoWeNeedAName.git && cd SoWeNeedAName   # или скопировать папку
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python test_behavior.py                          # 16/16
-# модель полос (иначе работает по трапеции):
-mkdir -p models/lanes_src && curl -L -o models/lanes_src/resources.tar.gz \
-  https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/324_Ultra-Fast-Lane-Detection-v2/resources.tar.gz
-tar -xzf models/lanes_src/resources.tar.gz -C models/lanes_src && \
-  cp "$(find models/lanes_src -name ufldv2_culane_res18_320x1600.onnx | head -1)" models/
-# ролики: ссылки в README («Данные»)
-.venv/bin/python main.py data/videos/krakow_cc_by.webm --start 66
-```
-На Windows: `.venv\Scripts\python`; CoreML нет — CUDA (`onnxruntime-gpu`) или CPU; на слабом ноутбуке
-`MODEL = "models/yolo11n.onnx"` и `LANE_EVERY = 3` в `config.py`.
-
-## 9. Известные ограничения
-- Своя полоса без разметки — фиксированная трапеция; встречная на повороте может выглядеть как машина впереди.
-- Дистанция в метрах приблизительная (`CAMERA_HFOV_DEG`), у DADA кадр очень широкий (1584×660).
-- Модель COCO без дообучения; ночью слабая.
-- Боковая скорость без разметки зависит от оценки своего поворота (медиана рамок) — нужен гироскоп.
+## Next steps
+1. Nexar collision dataset (needs the user to accept terms on Hugging Face + token): crash and normal clips
+   from the same cameras — the right data for a learned false-alarm filter.
+2. CAN speed/yaw input on a real head unit (`main.py --can-speed`).
+3. Pilot with a taxi fleet: event clips + driver reputation stats.

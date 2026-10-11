@@ -24,7 +24,7 @@ COLORS = [(200, 200, 200), (60, 200, 60), (0, 210, 255), (40, 40, 240)]
 FONT = cv2.FONT_HERSHEY_DUPLEX
 SHORT = {"danger": "DANGER", "ttc": "BRAKE", "closing": "CLOSING", "cutin": "CUT-IN", "crossing": "CROSSING",
          "ped": "PED", "ped_xwalk": "PED@XWALK", "vru_near": "PED NEAR", "drift": "DRIFT", "hardbrake": "HARD BRAKE",
-         "crash": "CRASH", "wrongway": "WRONG WAY", "weave": "ERRATIC", "close": "CLOSE", "brakelight": "STOP"}
+         "crash": "CRASH", "wrongway": "WRONG WAY", "weave": "ERRATIC", "skid": "SKID", "aggressive": "AGGRESSIVE", "close": "CLOSE", "brakelight": "STOP"}
 
 
 def _text(img, text, org, scale, color, thick=2):
@@ -130,7 +130,7 @@ def draw(frame, res, show_corridor=True, proc_fps=None, recording=False, advice=
     level = res.level
 
     if show_corridor and not draw_lanes(frame, res.lanes, level):
-        cv2.polylines(frame, [corridor_polygon(W, H)], True, COLORS[level] if level else (255, 255, 255), 1,
+        cv2.polylines(frame, [corridor_polygon(W, H, res.view)], True, COLORS[level] if level else (255, 255, 255), 1,
                       cv2.LINE_AA)
     draw_crosswalk(frame, res.crosswalk)
     if res.lead and not any(th.det.tid == res.lead.tid for th in res.threats):

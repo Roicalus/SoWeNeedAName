@@ -43,7 +43,9 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data", "bdd_det")
 ZIP = os.path.join(DATA, "zip", "bdd100k_images_100k.zip")
-YOLO = os.path.join(DATA, "yolo")          # prepared set: images/<split>/*.jpg + labels/<split>/*.txt
+# prepared set: images/<split>/*.jpg + labels/<split>/*.txt. Keep it on an SSD (BDD_YOLO_DIR or --yolo):
+# 70k small files read randomly from a hard disk starve the GPU (~30 images/s instead of hundreds)
+YOLO = os.environ.get("BDD_YOLO_DIR", os.path.join(DATA, "yolo"))
 META = os.path.join(DATA, "meta")          # metadata.jsonl: boxes (det_*) and time of day (period_*)
 HF = "https://huggingface.co/datasets/"
 ZIP_URL = HF + "Xing1210/bdd100k/resolve/main/bdd100k_images_100k.zip"
@@ -220,17 +222,20 @@ def prep(train_n, night_share, val_n, train_val_n, seed):
 
 
 # ---------------------------------------------------------------- training
-def train(arch, epochs, batch, device, workers, imgsz, resume, hours):
+def train(arch, epochs, batch, device, workers, imgsz, resume, hours, init=None, name=None):
     from ultralytics import YOLO as Y
     t = time.time()
-    run = f"{arch}_bdd"
+    run = name or f"{arch}_bdd"
     fetch(PT_URL.format(arch=arch), weights(arch))
-    model = Y(os.path.join(RUNS, run, "weights", "last.pt") if resume else weights(arch))
+    model = Y(os.path.join(RUNS, run, "weights", "last.pt") if resume else (init or weights(arch)))
+    extra = {}
+    if init:   # continue from already fine-tuned weights: a short run with a lower start lr and no long warm-up
+        extra = {"optimizer": "SGD", "lr0": 0.004, "warmup_epochs": 0.3}
     model.train(data=os.path.join(YOLO, "train.yaml"), epochs=epochs, imgsz=imgsz, batch=batch,
                 device=device, workers=workers, project=RUNS, name=run, exist_ok=True,
                 resume=resume, cos_lr=True, close_mosaic=max(1, epochs // 6), plots=False,
                 patience=100, amp=True, time=hours or None,
-                warmup_epochs=min(3.0, epochs * 0.1))   # default augmentations; short warm-up from pretrained weights
+                **({"warmup_epochs": min(3.0, epochs * 0.1)} | extra))   # default augmentations
     print(f"training: {(time.time() - t) / 60:.1f} min")
     return os.path.join(RUNS, run, "weights", "best.pt")
 
@@ -326,6 +331,15 @@ def evaluate(weights_list, device, batch):
     print(f"\n{'model':45s} {'set':6s} {'frames':>7s} {'AP50 vehicle':>13s} {'AP50 person':>12s}")
     for r in rows:
         print(f"{r[0]:45s} {r[1]:6s} {r[2]:7d} {r[3]:13.3f} {r[4]:12.3f}")
+    out = []
+    for w in weights_list:
+        name = os.path.relpath(w, ROOT)
+        get = {(r[1], k): r[3 if k == "v" else 4] for r in rows if r[0] == name for k in ("v", "p")}
+        out.append({"model": "fine-tuned on BDD100K (ours)" if os.sep + "runs" + os.sep in os.sep + name else "COCO weights (before)",
+                    "day_vehicle": get[("day", "v")], "night_vehicle": get[("night", "v")],
+                    "day_person": get[("day", "p")], "night_person": get[("night", "p")]})
+    with open(os.path.join(ROOT, "logs", "detector_ap.json"), "w", encoding="utf-8") as f:
+        json.dump(out, f, indent=1)
     return rows
 
 
@@ -398,7 +412,13 @@ def main():
     ap.add_argument("--opset", type=int, default=17)
     ap.add_argument("--video-path", default=os.path.join(ROOT, "data", "videos", "krakow_peds.mp4"))
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--init", help="start training from these weights (e.g. last.pt of an interrupted run)")
+    ap.add_argument("--name", help="run name (default <arch>_bdd)")
+    ap.add_argument("--yolo", help="prepared dataset folder (default BDD_YOLO_DIR or data/bdd_det/yolo)")
     a = ap.parse_args()
+    if a.yolo:
+        global YOLO
+        YOLO = a.yolo
     best = os.path.join(RUNS, f"{a.arch}_bdd", "weights", "best.pt")
     out = a.out or os.path.join(ROOT, "models", f"{a.arch}_bdd.onnx")
 
@@ -407,7 +427,7 @@ def main():
     if a.cmd in ("prep", "all"):
         prep(a.train_n, a.night_share, a.val_n, a.train_val_n, a.seed)
     if a.cmd in ("train", "all"):
-        best = train(a.arch, a.epochs, a.batch, a.device, a.workers, a.imgsz, a.resume, a.hours)
+        best = train(a.arch, a.epochs, a.batch, a.device, a.workers, a.imgsz, a.resume, a.hours, a.init, a.name)
     if a.cmd in ("eval", "all"):
         evaluate(a.weights or [weights(a.arch), best], a.device, a.batch)
     if a.cmd in ("export", "all"):

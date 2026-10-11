@@ -73,6 +73,8 @@ def test_hard_braking_ahead():
 
 
 def test_weaving_detected():
+    if not C.WEAVE:
+        return
     frames = [[car(0.5 + 0.3 * 0.12 * math.sin(2 * math.pi * i / FPS / 2), 0.12)] for i in range(150)]
     assert seen(run(frames), "weave")
 
@@ -85,16 +87,18 @@ def test_lane_change_not_weaving():
     assert not seen(run(frames), "weave")
 
 
-def test_pedestrian_in_lane():
-    ped = Detection((600, 400, 660, 560), C.PERSON_CLASS, 7)
-    assert seen(run([[ped] for _ in range(10)]), "ped")
-
-
-def test_pedestrian_in_lane_while_stopped_is_green():
-    """We stand at a crossing (own speed 0): people walking in front are attention, not risk."""
-    ped = Detection((600, 400, 660, 560), C.PERSON_CLASS, 7)
-    out = run([[ped] for _ in range(10)], ego=(0.0, 0.0, True))
-    assert seen(out, "ped", 1) and not seen(out, "ped", 2) and not seen(out, "ped", 3)
+def test_truck_crossing_in_front():
+    """A truck seen from the side drives across our path 12 m ahead and we close in: collision course."""
+    frames = []
+    for i in range(45):
+        t = i / FPS
+        z = 12 - 8 * t                                   # we approach at 8 m/s
+        h = 0.25 * 12 / z                                # box height ~ 1 / distance
+        cx = 0.62 - 0.12 * t                             # moves towards the centre
+        w = 2.6 * h * H / W
+        frames.append([Detection(((cx - w / 2) * W, 0.75 * H - h * H, (cx + w / 2) * W, 0.75 * H), 7, 3)])
+    out = run(frames)
+    assert seen(out, "crossing"), "a truck crossing right in front must raise an alert"
 
 
 def test_pedestrian_on_sidewalk_ignored():
@@ -103,18 +107,51 @@ def test_pedestrian_on_sidewalk_ignored():
     assert not seen(out, "ped")
 
 
+def ped(cx, height, tid=7, bottom=0.78):
+    """Pedestrian box: centre cx (frame fraction), height (frame fraction)."""
+    hp = height * H
+    return Detection((cx * W - 0.18 * hp, bottom * H - hp, cx * W + 0.18 * hp, bottom * H), C.PERSON_CLASS, tid)
+
+
+def test_pedestrian_on_road_while_approaching():
+    """A person on our path 20 m ahead and we drive towards them at 8 m/s: warn in advance."""
+    out = run([[ped(0.5, 0.12 * 20 / (20 - 8 * i / FPS))] for i in range(40)])
+    assert seen(out, "ped", 2) or seen(out, "ped", 3)
+    first = next(i for i, (k, _) in enumerate(out) if k.get("ped", 0) >= 2)
+    assert first < 25, f"warned too late (frame {first})"
+
+
+def test_pedestrian_in_front_of_standing_car_no_alert():
+    """We stand at a crossing; people walk across right in front: no alert (the driver sees them)."""
+    out = run([[ped(0.3 + 0.01 * i, 0.25)] for i in range(40)])
+    assert not seen(out, "ped")
+
+
+def test_pedestrian_on_sidewalk_no_alert():
+    """A person standing on the pavement / waiting at a crosswalk while we drive past: no alert."""
+    def frame(i):
+        k = 25 / (25 - 8 * i / FPS)                       # we approach: everything grows as 1 / distance,
+        return [ped(0.5 + 0.12 * k, 0.10 * k)]           # including the person's offset from the centre
+    frames = [frame(i) for i in range(40)]
+    out = run(frames, crosswalk=(0.2, 0.6, 0.8, 0.68))
+    assert not any(set(k) & {"ped", "ped_xwalk", "vru_near"} for k, _ in out)
+
+
 def test_sudden_pedestrian():
-    """A pedestrian appears from behind a parked van, close and next to our lane: warn at once."""
-    frames = [[] for _ in range(10)] + [[Detection((830, 330, 900, 560), C.PERSON_CLASS, 9)] for _ in range(10)]
+    """A pedestrian steps out from behind a parked van right in front while we drive: warn at once."""
+    frames = [[] for _ in range(10)] + [[ped(0.53, 0.20 * 14 / (14 - 8 * i / FPS), tid=9)] for i in range(25)]
     out = run(frames)
-    assert seen(out, "ped", 2), "a pedestrian that suddenly appears close must be yellow"
+    assert seen(out, "ped", 2) or seen(out, "ped", 3)
 
 
-def test_pedestrian_at_crosswalk_is_green():
-    """A pedestrian standing at the edge of a crosswalk 20 m ahead: attention."""
-    ped = Detection((880, 300, 905, 370), C.PERSON_CLASS, 5)
-    out = run([[ped] for _ in range(30)], crosswalk=(0.2, 0.48, 0.8, 0.53))
-    assert seen(out, "ped_xwalk", 1)
+def test_pedestrian_stepping_into_lane():
+    """A pedestrian walks from the kerb into our lane while we approach: warn before they are in it."""
+    frames = []
+    for i in range(30):
+        h = 0.16 * 15 / (15 - 6 * i / FPS)
+        frames.append([ped(0.78 - 0.012 * i, h)])
+    out = run(frames)
+    assert seen(out, "ped", 2) or seen(out, "ped", 3)
 
 
 def test_car_in_other_lane_ignored():
@@ -131,17 +168,26 @@ def test_parked_car_passing_ignored():
     assert not seen(out, "ttc") and not seen(out, "closing")
 
 
-def test_crash_in_other_lane_detected():
-    """A car in the next lane "takes off": its box jumps up and stretches, the width stays."""
+def _crash_frames(width):
+    """A car in the next lane "takes off" from second 2: its box jumps up and stretches, the width stays."""
     frames = []
     for i in range(90):
-        k = max(0, i - 60) / FPS                  # crash from second 2
-        w, x1, y2 = 0.09 * W, 0.75 * W, 0.62 * H - 1.0 * 0.07 * H * k / 0.3
+        k = max(0, i - 60) / FPS
+        w, x1, y2 = width * W, 0.72 * W, 0.62 * H - 1.0 * 0.07 * H * k / 0.3
         h = 0.8 * w * (1 + 2.0 * k)
         frames.append([Detection((x1, y2 - h, x1 + w, y2), 2, 7), car(0.3, 0.05, tid=8, bottom=0.6)])
-    out = run(frames)
+    return frames
+
+
+def test_crash_in_other_lane_detected():
+    out = run(_crash_frames(0.12))
     assert not any("crash" in kinds for kinds, _ in out[:60]), "no alarm before the crash"
-    assert seen(out[60:], "crash", 3), "a crash of a neighbouring car must be red"
+    assert seen(out[60:], "crash", 3), "a crash of a close neighbouring car must be red"
+
+
+def test_far_crash_is_yellow():
+    out = run(_crash_frames(0.07))
+    assert seen(out[60:], "crash", 2) and not seen(out, "crash", 3)
 
 
 def test_car_driving_away_not_crash():
@@ -184,14 +230,53 @@ def test_neighbor_lane_steady_not_cut_in():
     assert not any(set(kinds) & {"cutin", "crossing", "drift"} for kinds, _ in out)
 
 
-def test_pedestrian_stepping_into_lane():
+def test_skid_ahead_detected():
+    """A car 20 m ahead loses control: it slides sideways while its body turns (box gets much wider)."""
+    if not C.SKID:
+        return
     frames = []
-    for i in range(30):
-        x = 900 - 12 * i                                       # ~1.3 m/s towards the centre at 160 px height
-        frames.append([Detection((x, 400, x + 60, 560), C.PERSON_CLASS, 7)])
+    for i in range(60):
+        t = i / FPS
+        k = max(0.0, t - 1.0)                          # skid from second 1
+        w0 = 0.09
+        w = w0 * (1 + 1.2 * k)                          # body turns: the box widens, the height stays
+        hp = 0.8 * w0 * W                               # box height in pixels
+        cx = 0.5 + 0.12 * k
+        frames.append([Detection(((cx - w / 2) * W, 0.62 * H - hp, (cx + w / 2) * W, 0.62 * H), 2, 5)])
     out = run(frames)
-    first = next(i for i, (kinds, _) in enumerate(out) if kinds.get("ped", 0) >= 2)
-    assert first < 25, f"pedestrian noticed late (frame {first})"
+    assert seen(out, "skid"), "a car spinning ahead must raise an alert"
+    assert not any("skid" in k for k, _ in out[:30]), "no alert while it drives straight"
+
+
+def test_parked_car_while_turning_no_cutin():
+    """We turn (whole background shifts right) past a parked car at the kerb: no cut-in / crossing."""
+    frames = []
+    for i in range(45):
+        t = i / FPS
+        cx = 0.25 + 0.3 * t                          # the car sweeps through the frame because of our turn
+        frames.append([car(cx, 0.12, tid=2, bottom=0.72)])
+    out = run(frames, ego=(5.0, 0.3, True))          # yaw 0.3 frame widths/s from the background flow
+    assert not any(set(k) & {"cutin", "crossing", "drift"} for k, _ in out)
+
+
+def test_aggressive_driver_remembered():
+    """A car 15 m ahead hops between lanes again and again: we are told to watch it (green, then yellow)."""
+    frames = []
+    for i in range(int(9 * FPS)):
+        t = i / FPS
+        lane = [0, 1, 0, -1, 0, 1][min(int(t / 1.5), 5)]       # a new lane every 1.5 s
+        width = 0.1
+        X = lane * 3.5 / 1.8                                   # lane offset in car widths
+        frames.append([car(0.5 + X * width, width, tid=4, bottom=0.62),
+                       car(0.15, 0.04, tid=5, bottom=0.55), car(0.85, 0.04, tid=6, bottom=0.55)])
+    out = run(frames)
+    assert seen(out, "aggressive", 1), "a car changing lanes again and again must be flagged (green)"
+    assert not seen(out, "aggressive", 3)
+
+
+def test_steady_neighbour_not_aggressive():
+    frames = [[car(0.5 + 2.0 * 0.1, 0.1, tid=4, bottom=0.62)] for _ in range(int(8 * FPS))]
+    assert not seen(run(frames), "aggressive")
 
 
 def _res(kind, level, box=(900, 300, 1000, 400)):

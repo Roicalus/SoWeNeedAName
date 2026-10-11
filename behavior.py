@@ -20,6 +20,9 @@ Threats derived from that:
   ped_xwalk      - pedestrian at a crosswalk ahead (crosswalk.py);
   vru_near       - pedestrian / cyclist close to the road edge ahead;
   crash          - any car "takes off" (box jumps up and gets taller) - a collision in view;
+  skid           - a car ahead suddenly turns its body and slides sideways (loss of control);
+  aggressive     - a car that already made risky manoeuvres (hard braking, cut-in, weaving, frequent lane
+                   changes) is still near us: the driver is told to keep an eye on it;
   weave          - car ahead oscillates in its lane;
   close          - too close to the car ahead while closing in;
   danger         - learned risk model (risk.py) says the scene looks like the seconds before a crash.
@@ -43,6 +46,15 @@ FEATURES = ["veh_in_near", "veh_in_ttc", "veh_in_rate", "veh_in_jerk", "veh_side
             "veh_side_ttc", "veh_cross_near", "veh_count_near", "veh_lat_speed", "vru_in_near", "vru_side_toward",
             "vru_side_near", "vru_new_near", "vru_count_near", "xwalk", "crash", "crash_rise", "oncoming", "weave",
             "lanes_ok", "ego_speed", "ego_yaw", "n_tracks", "any_ttc"]
+RULE_KINDS = ["ttc", "closing", "hardbrake", "cutin", "crossing", "drift", "ped", "ped_xwalk", "vru_near", "crash",
+              "wrongway", "weave", "close", "skid", "aggressive"]
+MARK_KINDS = {"hardbrake", "cutin", "crossing", "drift", "weave", "skid"}   # risky manoeuvres a car is remembered for
+FEATURES += [f"rule_{k}" for k in RULE_KINDS]       # which rules fired and how loudly (level 0-3)
+# per-threat features for the learned threat scorer (risk.py). Scale-free on purpose (TTC, lanes, seconds):
+# metres and frame fractions depend on the camera and would let a model recognise the dataset
+THREAT_FEATURES = [f"is_{k}" for k in RULE_KINDS] + [
+    "level", "vehicle", "person", "two_wheeler", "side_view", "abs_u", "toward", "abs_du", "inv_ttc", "u_impact",
+    "age", "jitter", "growth", "in_path", "edge", "n_threats"]
 _SKIP = object()      # "crosswalk not analysed on this step"
 
 
@@ -71,6 +83,8 @@ class Threat:
     ttc: float | None
     dist: float | None
     path: tuple | None = None   # (x, y) where the object will be in C.PREDICT_SEC - for the on-screen arrow
+    feat: list | None = None    # THREAT_FEATURES for the learned threat scorer
+    score: float | None = None  # threat scorer probability (None - no model)
 
 
 @dataclass
@@ -86,6 +100,7 @@ class FrameResult:
     lanes: LaneModel | None = None                 # lane markings (for drawing) when visible
     crosswalk: tuple | None = None                 # crosswalk box (frame fractions) when visible
     ego_speed: float | None = None                 # m/s, when known
+    view: tuple = (C.CORRIDOR_TOP_Y, C.HOOD_Y)     # (horizon, hood) rows found by BehaviorEngine.calibrate
     risk: float = 0.0                              # overall danger 0..1
     features: dict = field(default_factory=dict)   # scene features for the risk model (risk.py)
     # for debugging (debug_video.py): status of every box, raw conditions before confirmation, weave metrics
@@ -122,10 +137,12 @@ def on_path(cx, width):
     return abs(cx - C.CORRIDOR_CENTER_X) / max(width, 1e-6) <= C.LEAD_MAX_OFFSET
 
 
-def corridor_polygon(W, H):
-    cx, top = C.CORRIDOR_CENTER_X, C.CORRIDOR_TOP_Y
+def corridor_polygon(W, H, view=None):
+    """Own-lane trapezoid in pixels; view = (horizon, hood) from BehaviorEngine.calibrate."""
+    top, bottom = view if view else (C.CORRIDOR_TOP_Y, 1.0)
+    cx = C.CORRIDOR_CENTER_X
     pts = [(cx - C.CORRIDOR_TOP_HALF, top), (cx + C.CORRIDOR_TOP_HALF, top),
-           (cx + C.CORRIDOR_BOTTOM_HALF, 1.0), (cx - C.CORRIDOR_BOTTOM_HALF, 1.0)]
+           (cx + C.CORRIDOR_BOTTOM_HALF, bottom), (cx - C.CORRIDOR_BOTTOM_HALF, bottom)]
     return np.array([(int(x * W), int(y * H)) for x, y in pts], np.int32)
 
 
@@ -152,7 +169,16 @@ class BehaviorEngine:
         from risk import RiskModel
         self.risk = RiskModel()
         self.yaw = deque()                  # (t, median box shift in x) - own turning
+        self.bottoms = deque()              # (t, bottom, width) of car boxes - where the road is in this camera
+        self.top, self.hood = C.CORRIDOR_TOP_Y, C.HOOD_Y
         self.crash_rise = 0.0
+        self.crit_hist = {}                 # track id -> times of critical TTC (for "physically certain")
+        self.crash_hits = {}                # track id -> crash signs in the last analyses
+        self.marks = defaultdict(list)      # track id -> [(t, kind)] risky manoeuvres this car made
+        self.lane_idx = {}                  # track id -> (lane index, since) for counting its lane changes
+        self.prev_active = set()            # alert kinds confirmed on the previous step
+        self.dense = False                  # dense slow traffic around us
+        self.last_level = {}                # alert kind -> last level its threats had
 
     # ================================================================ main step
     def update(self, t, W, H, detections, frame=None, lanes=None, ego=None, crosswalk=_SKIP):
@@ -170,13 +196,22 @@ class BehaviorEngine:
         res.crosswalk = self.xwalk.box
         ego_ok = ego is not None and ego[2]
         res.ego_speed = ego[0] if ego_ok else None
-        stopped = ego_ok and ego[0] < 1.0
+        # own speed from video (egomotion.py) is a rough estimate: it only feeds the risk model. Decisions
+        # that depend on it ("we stand still", "that car is parked") need a trusted source - the vehicle
+        # bus (CAN) passes ego = (speed, yaw, ok, True)
+        trusted = ego_ok and len(ego) > 3 and bool(ego[3])
+        stopped = trusted and ego[0] < 1.0
         aspect = W / H
+        self._calibrate(t, W, H, detections)
+        res.view = (self.top, self.hood)
 
         live = []
+        bikes = [d.box for d in detections if d.cls in (C.BICYCLE_CLASS, 3)]
         for d in detections:
             x1, y1, x2, y2 = d.box
-            if (y1 + y2) / 2 / H > C.HOOD_Y:
+            if d.cls == C.PERSON_CLASS and any(self._rider(d.box, b) for b in bikes):
+                continue                     # a rider: the motorbike / bicycle box represents them
+            if (y1 + y2) / 2 / H > self.hood:
                 res.tracks.append((d, "hood"))
                 continue                     # our own hood
             if d.cls not in C.VEHICLE_CLASSES and d.cls not in VRU_CLASSES:
@@ -192,10 +227,26 @@ class BehaviorEngine:
             self.first_seen.setdefault(d.tid, t)
             live.append(d)
         self._forget(t)
-        yaw = ego[1] if ego_ok else self._yaw_rate(t, live)
+        yaw = self._yaw_rate(t, live)
         if ego_ok:
-            self._yaw_rate(t, live)          # keep the history consistent
+            yaw = ego[1]           # from far background (egomotion.py) - steadier than a few car boxes
+        # while we turn sharply, sideways motion of cars in the frame is mostly our own rotation: lane-change
+        # and crossing rules for cars then need an imminent collision (parked cars swing through the frame)
+        turning = abs(yaw) > C.YAW_TURN
+        # the sideways speed a car needs to count as moving towards us grows with our own turning: an error in
+        # the turning estimate (fisheye lenses, few far points) makes parked cars "slide" in the frame
+        slack = C.YAW_SLACK * abs(yaw)
 
+        # dense, slow traffic (a jam): several cars right next to us. Lane nudges there are normal, so lane
+        # changes and crossings are only green unless a collision is imminent; reputation is not counted
+        close_cars = 0
+        for d in live:
+            if d.cls in C.VEHICLE_CLASSES:
+                bx1, by1, bx2, by2 = self.hist[d.tid][-1][1:5]
+                sv = (bx2 - bx1) * aspect > C.CROSS_MIN_ASPECT * (by2 - by1)
+                dd = self._distance(d.cls, bx2 - bx1, by2 - by1, aspect, sv)
+                close_cars += dd is not None and dd < C.DENSE_DIST
+        self.dense = close_cars >= C.DENSE_CARS
         raw, threats, lead = set(), [], None
         F = dict.fromkeys(FEATURES, 0.0)
         F["lanes_ok"] = float(lanes_ok)
@@ -215,10 +266,21 @@ class BehaviorEngine:
             ttc = self._ttc(h, t, by_height=side_view or not vehicle)
             du = self._lat_speed(h, t, yaw, lanes_ok, vehicle, aspect)
             inside = x1 > C.EDGE_MARGIN and x2 < 1 - C.EDGE_MARGIN
-            ahead = by >= C.CORRIDOR_TOP_Y
+            whole = x1 > C.SIDE_MARGIN and x2 < 1 - C.SIDE_MARGIN     # fully in view: cut boxes give wrong geometry
+            ahead = by >= self.top
             in_lane = u is not None and abs(u) <= C.IN_LANE and ahead
+            # in our path: by lateral offset AND (without lane markings) by where the box bottom sits in our
+            # corridor - a car parked at the kerb seen half from the side has a wide box, so its offset in its
+            # own widths looks small, but its centre is at the corridor edge
+            in_corr = lanes_ok or abs((x1 + x2) / 2 - C.CORRIDOR_CENTER_X) <= self._half(by) * C.PATH_CORRIDOR_FRAC
+            in_path = u is not None and abs(u) <= (C.IMPACT_U_CAR if vehicle else C.IMPACT_U) and ahead and in_corr
+            in_lane = in_lane and in_corr
             toward = -math.copysign(1, u) * du if (u is not None and du is not None and u != 0) else 0.0
             age = t - self.first_seen[d.tid]
+            # standing still on the road: we close in on it exactly at our own speed (parked cars at the
+            # kerb drift sideways in the frame as we pass them - they must not look like a cut-in)
+            static = vehicle and trusted and ego[0] > C.STATIC_MIN_EGO and ttc is not None and dist is not None \
+                and abs(dist / ttc - ego[0]) < C.STATIC_TOL * ego[0]
             status = f"u{u:+.1f}" if u is not None else "-"
             if du is not None and abs(du) >= 0.2:
                 status += f" {du:+.1f}/s"
@@ -256,36 +318,44 @@ class BehaviorEngine:
                 lead = d
 
             # --- cut-in / crossing / drift: a car from the side moving into our lane
-            if u is not None and du is not None and ahead and inside and not in_lane and abs(u) <= C.CUTIN_MAX_U:
+            if u is not None and du is not None and ahead and whole and not in_lane and abs(u) <= C.CUTIN_MAX_U \
+                    and not static and age >= C.CUTIN_MIN_AGE:
                 t_in = (abs(u) - C.IN_LANE) / toward if toward > 0 else None
                 # dangerous only if we approach it (TTC) or it is already close: at traffic lights the
                 # cross traffic and lane changes far ahead are not a threat
                 closing_in = (ttc is not None and ttc <= C.CUTIN_TTC) or (dist is not None and dist <= C.CRIT_DIST)
-                if vehicle and closing_in and dist <= C.CUTIN_MAX_DIST and toward >= C.CUTIN_MIN_SPEED \
-                        and t_in is not None and t_in <= C.CUTIN_HORIZON:
+                if vehicle and closing_in and dist <= C.CUTIN_MAX_DIST and toward >= C.CUTIN_MIN_SPEED + slack \
+                        and t_in is not None and t_in <= C.CUTIN_HORIZON \
+                        and (not turning or (ttc is not None and ttc < C.TTC_CRITICAL)):
                     # seen from the side (driving across - junction, U-turn): "crossing"; else a lane change
                     kind = "crossing" if side_view else "cutin"
-                    found.append((kind, 3 if ttc is not None and ttc < C.CUTIN_CRIT_TTC else 2))
-                elif vehicle and not side_view and dist <= C.DRIFT_MAX_DIST and toward >= C.DRIFT_MIN_SPEED \
-                        and t_in is not None and t_in <= C.DRIFT_HORIZON and not stopped:
+                    crit = ttc is not None and ttc < C.CUTIN_CRIT_TTC and dist <= C.CUTIN_CRIT_DIST
+                    found.append((kind, 3 if crit else 2))   # a helper, not an alarm: red only if imminent
+                elif vehicle and not side_view and dist <= C.DRIFT_MAX_DIST and toward >= C.DRIFT_MIN_SPEED + slack \
+                        and t_in is not None and t_in <= C.DRIFT_HORIZON and not stopped and not turning:
                     found.append(("drift", 1))
             # --- pedestrians and two-wheelers
             if not vehicle and dist is not None and ahead:
                 lvl = 0
                 kind = "ped"
-                if in_lane and dist <= C.VRU_NEAR:                          # on our path
-                    lvl = 3 if dist <= C.CRIT_DIST else 2
-                elif u is not None and du is not None and not in_lane and toward >= C.VRU_MIN_SPEED:
+                # a person matters only if we are driving towards them (their box grows: TTC). People on the
+                # pavement, waiting at a crossing or walking in front of a car that stands still are not a hazard
+                approaching = ttc is not None and ttc <= C.PED_TTC
+                if in_path and dist <= C.VRU_NEAR and approaching:                  # on our path, we close in
+                    lvl = 3 if ttc < C.TTC_CRITICAL else 2
+                elif u is not None and du is not None and not in_lane and toward >= C.VRU_MIN_SPEED \
+                        and abs(u) <= C.VRU_STEP_U and age >= C.CUTIN_MIN_AGE:
                     t_in = (abs(u) - C.IN_LANE) / toward
-                    closing_in = (ttc is not None and ttc <= C.CUTIN_TTC) or dist <= C.CRIT_DIST
-                    if closing_in and dist <= C.VRU_DIST and t_in <= C.VRU_HORIZON:   # stepping into our lane
+                    closing_in = ttc is not None and ttc <= C.CUTIN_TTC
+                    if closing_in and dist <= C.VRU_DIST and t_in <= C.VRU_HORIZON \
+                            and self._steady_u(h, t, 0.5, 9.0):                          # stepping into our lane
                         lvl = 3 if ttc is not None and ttc < C.CUTIN_CRIT_TTC else 2
-                if not lvl and age <= C.VRU_SUDDEN_AGE and dist <= C.VRU_SUDDEN_DIST \
+                if not lvl and age <= C.VRU_SUDDEN_AGE and dist <= C.VRU_SUDDEN_DIST and inside and approaching \
                         and u is not None and abs(u) <= C.VRU_SUDDEN_U:            # appeared suddenly close
                     lvl = 2
-                if not lvl and C.CROSSWALK and self.xwalk.near((x1 + x2) / 2, by) and dist <= C.CROSSWALK_DIST:
+                if not lvl and C.PED_XWALK_ALERT and self.xwalk.near((x1 + x2) / 2, by) and dist <= C.CROSSWALK_DIST:
                     kind, lvl = "ped_xwalk", 1                                   # at a crosswalk ahead
-                if not lvl and u is not None and abs(u) <= C.VRU_EDGE_U and dist <= C.VRU_ATTENTION_DIST:
+                if not lvl and C.VRU_NEAR_ALERT and u is not None and abs(u) <= C.VRU_EDGE_U and dist <= C.VRU_ATTENTION_DIST:
                     kind, lvl = "vru_near", 1                                    # close to the road edge
                 if lvl and stopped and kind == "ped":
                     lvl = 1                  # we stand still: people crossing in front are not a risk yet
@@ -293,33 +363,77 @@ class BehaviorEngine:
                     found.append((kind, lvl))
                     if kind == "ped":
                         res.peds.append(d)
-            # --- car in our lane closing in fast
-            if vehicle and in_lane and inside and not side_view and ttc is not None and w >= C.TTC_MIN_WIDTH:
+            # --- collision course: where will the object be sideways when we reach it? A constant bearing
+            # means collision - u + du * TTC inside our track. Catches cars crossing right in front,
+            # pedestrians running in, cars half in our path; cars ahead in our path are handled below
+            if ttc is not None and u is not None and ahead and dist is not None and dist <= C.COURSE_MAX_DIST \
+                    and ttc <= C.COURSE_TTC and not (vehicle and in_path and not side_view) and not static \
+                    and (whole or not vehicle) \
+                    and not found and not (vehicle and turning and ttc >= C.TTC_CRITICAL):
+                u_imp = u + (du or 0.0) * ttc
+                # a car must really move towards our path - or be right across it (seen from the side, centred)
+                moving_in = toward >= C.COURSE_MIN_TOWARD + slack or (side_view and in_path)
+                if abs(u_imp) <= C.IMPACT_U and (du is not None or abs(u) <= C.IMPACT_U) \
+                        and (moving_in or (not vehicle and (toward >= C.COURSE_MIN_TOWARD or in_path))):
+                    kind = "ped" if not vehicle else ("crossing" if side_view else "cutin")
+                    crit = ttc < C.CUTIN_CRIT_TTC and dist <= C.CUTIN_CRIT_DIST
+                    lvl = 3 if crit or (not vehicle and ttc < C.TTC_CRITICAL) else 2
+                    if stopped and not vehicle:
+                        lvl = 1
+                    found.append((kind, lvl))
+                    if kind == "ped":
+                        res.peds.append(d)
+            # --- car in our path closing in fast
+            if vehicle and in_path and inside and not side_view and ttc is not None and w >= C.TTC_MIN_WIDTH:
                 closing_ms = dist / ttc if dist else 0
                 if closing_ms > C.LEAD_MAX_CLOSING:
                     # closing faster than ~43 km/h: oncoming. Lane markings show it is in our lane - danger;
                     # without markings (curve, trapezoid) it is more likely a false "car ahead"
-                    if lanes_ok and ttc < C.WRONGWAY_TTC:
-                        found.append(("wrongway", 3))
+                    # wrong-way car: markings visible, the car steadily in the middle of our lane, well inside
+                    # the frame and closing really fast (a parked car we pass can look "in lane" when the
+                    # lane network takes a bike lane or a kerb for our lane)
+                    if lanes_ok and ttc < C.WRONGWAY_TTC and abs(u) <= C.WRONGWAY_U and closing_ms > C.WRONGWAY_CLOSING \
+                            and x1 > 0.05 and x2 < 0.95 and self._steady_u(h, t):
+                        found.append(("wrongway", 3 if ttc < C.CUTIN_CRIT_TTC else 2))
                     elif d is lead:
                         res.oncoming = True
                 elif ttc < C.TTC_WARNING:
                     crit = ttc < C.TTC_CRITICAL and w >= C.CRITICAL_MIN_WIDTH
+                    if crit:
+                        self.crit_hist.setdefault(d.tid, deque()).append(t)
                     found.append(("ttc", 3) if crit else ("closing", 2))
 
+            # --- skid / loss of control: a car ahead suddenly turns its body (box proportions change fast while
+            # it slides sideways) - it may spin into our path
+            if C.SKID and vehicle and ahead and inside and u is not None and abs(u) <= C.SKID_MAX_U and dist is not None \
+                    and dist <= C.SKID_MAX_DIST and age >= C.CUTIN_MIN_AGE:
+                spin = self._spin(h, t)
+                if spin >= C.SKID_ASPECT_RATE and du is not None and abs(du) >= C.SKID_MIN_DU:
+                    close = dist <= C.SKID_CRIT_DIST or (ttc is not None and ttc < C.TTC_WARNING)
+                    found.append(("skid", 3 if close else 2))
+            if self.dense:
+                found = [(k, 1 if k in ("cutin", "crossing", "drift") and lv < 3 else lv) for k, lv in found]
             for kind, level in found:
-                threats.append(Threat(d, kind, level, u, du, ttc, dist, self._predict(h, u, du, yaw)))
+                th = Threat(d, kind, level, u, du, ttc, dist, self._predict(h, u, du, yaw))
+                th.feat = self._threat_feat(th, h, t, side_view, in_path, inside, age)
+                threats.append(th)
                 raw.add(kind)
             res.tracks.append((d, status + "".join(f" {k.upper()}" for k, _ in found)))
 
         # --- crash of any car in view: keep the alarm CRASH_HOLD seconds even if the track is lost
-        for tid in self._crashes(t):
-            self.crash_at[tid] = t
+        hits = set(self._crashes(t))
+        for tid in set(self.crash_hits) | hits:
+            q = self.crash_hits.setdefault(tid, deque(maxlen=3))
+            q.append(tid in hits)
+            if sum(q) >= C.CRASH_HITS:         # crash signs in 2 of the last 3 analyses: not a single box jump
+                self.crash_at[tid] = t
+        self.crash_hits = {k: q for k, q in self.crash_hits.items() if any(q)}
         self.crash_at = {k: v for k, v in self.crash_at.items() if t - v <= C.CRASH_HOLD}
         if self.crash_at:
             raw.add("crash")
             res.crashed = [d for d in live if d.tid in self.crash_at]
-            threats += [Threat(d, "crash", 3, None, None, None, None) for d in res.crashed]
+            threats += [Threat(d, "crash", 3 if d.box[2] - d.box[0] >= C.CRASH_CRIT_WIDTH * W else 2,
+                               None, None, None, None) for d in res.crashed]
 
         # --- car ahead: distance, TTC, hard braking, "too close", weaving, brake lights
         if lead:
@@ -334,7 +448,7 @@ class BehaviorEngine:
             rate, jerk = self._brake(lead.tid, h, t) if not side else (0.0, 0.0)
             F["veh_in_rate"], F["veh_in_jerk"] = max(rate, 0.0), max(jerk, 0.0)
             if not res.oncoming and res.distance is not None and res.distance <= C.BRAKE_MAX_DIST \
-                    and rate >= C.BRAKE_RATE and jerk >= C.BRAKE_JERK:
+                    and rate >= C.BRAKE_RATE and jerk >= C.BRAKE_JERK and res.ttc is not None and res.ttc < C.BRAKE_MAX_TTC:
                 raw.add("hardbrake")
                 crit = res.ttc is not None and res.ttc < C.BRAKE_CRIT_TTC
                 threats.append(Threat(lead, "hardbrake", 3 if crit else 2, h[-1][5], None, res.ttc, res.distance))
@@ -344,29 +458,177 @@ class BehaviorEngine:
                 threats.append(Threat(lead, "close", 1, h[-1][5], None, res.ttc, res.distance))
             # no weaving from lane markings: their jitter is above the amplitude threshold
             weaving, res.weave = self._weaving(h, t, stats=True)
-            if weaving:
+            if weaving and C.WEAVE:
                 raw.add("weave")
                 threats.append(Threat(lead, "weave", 2, h[-1][5], None, res.ttc, res.distance))
             if C.BRAKE_LIGHTS and frame is not None and self._brake_lights(frame, lead):
                 raw.add("brakelight")
                 threats.append(Threat(lead, "brakelight", 1, h[-1][5], None, res.ttc, res.distance))
 
+        self._reputation(t, live, threats, raw, aspect)
         F["crash"] = float(bool(self.crash_at))
         F["crash_rise"] = self.crash_rise
         F["oncoming"] = float(res.oncoming or "wrongway" in raw)
         F["weave"] = float("weave" in raw)
+        for th in threats:
+            key = f"rule_{th.kind}"
+            if key in F:
+                F[key] = max(F[key], float(th.level))
+            if th.feat is None:                      # threats on the car ahead / crashes
+                h = self.hist.get(th.det.tid)
+                if h:
+                    x1, y1, x2, y2 = h[-1][1:5]
+                    sv = (x2 - x1) * aspect > C.CROSS_MIN_ASPECT * (y2 - y1)
+                    th.feat = self._threat_feat(th, h, t, sv, True, True, t - self.first_seen.get(th.det.tid, t))
         res.features = F
-        p = self.risk(t, F)                  # learned model (risk.py): does this look like the seconds before a crash
-        if p is not None and p >= self.risk.threshold:
-            raw.add("danger")
-            lvl = 3 if p >= self.risk.threshold_red else 2
-            target = lead or (max(live, key=lambda d: d.box[3]) if live else None)
-            if target is not None:
-                threats.append(Threat(target, "danger", lvl, None, None, None, None))
+        # learned threat scorer (risk.py): keeps a rule's yellow / red only if this particular threat looks
+        # like the ones before real crashes; otherwise it is shown green ("attention") - still on screen,
+        # but no alarm. Physically certain cases (an imminent collision with a close car) are never lowered.
+        for th in threats:
+            if th.feat is not None:
+                th.feat[THREAT_FEATURES.index("n_threats")] = float(len(threats))
+            th.score = self.risk.threat_score(th.feat) if th.feat is not None else None
+            if th.score is None or self._certain(th, t):
+                continue
+            if th.level >= 3 and th.score < self.risk.gate_red:
+                th.level = 2
+            if th.level >= 2 and th.score < self.risk.gate_yellow:
+                th.level = 1
+        p = self.risk(t, F)                  # scene model: does this look like the seconds before a crash
+        if p is not None:
+            if p >= self.risk.threshold:
+                raw.add("danger")
+                lvl = 3 if p >= self.risk.threshold_red else 2
+                target = lead or (max(live, key=lambda d: d.box[3]) if live else None)
+                if target is not None:
+                    threats.append(Threat(target, "danger", lvl, None, None, None, None))
         res.raw, res.threats = raw, threats
         res.alerts = self._confirm(t, raw, threats)
         res.risk = p if p is not None else max((th.level for th in threats), default=0) / 3
         return res
+
+    @staticmethod
+    def _rider(p, b):
+        """Person box p sits on a two-wheeler box b (most of the person's lower half overlaps it)."""
+        ix = max(0.0, min(p[2], b[2]) - max(p[0], b[0]))
+        iy = max(0.0, min(p[3], b[3]) - max((p[1] + p[3]) / 2, b[1]))
+        return ix * iy >= 0.4 * (p[2] - p[0]) * (p[3] - p[1]) / 2
+
+    def _half(self, y):
+        """Half-width of the own-lane corridor at row y (frame fractions), between the calibrated horizon and hood."""
+        k = max(0.0, min(1.0, (y - self.top) / max(self.hood - self.top, 1e-6)))
+        return C.CORRIDOR_TOP_HALF + k * (C.CORRIDOR_BOTTOM_HALF - C.CORRIDOR_TOP_HALF)
+
+    def _calibrate(self, t, W, H, detections):
+        """Where the road is in this camera. Dashcams differ a lot: some see the horizon at 0.3 of the
+        height and a hood covering the bottom 40%. Far cars stand on the horizon: the low percentile of
+        small car boxes' bottoms gives it; nothing is ever seen below the hood, so the high percentile of
+        all car bottoms bounds it."""
+        for d in detections:
+            x1, y1, x2, y2 = d.box
+            if d.cls in C.VEHICLE_CLASSES and (x2 - x1) / W < 0.5 and y2 / H < 0.985:
+                self.bottoms.append((t, y2 / H, (x2 - x1) / W))
+        while self.bottoms and t - self.bottoms[0][0] > C.CALIB_WINDOW:
+            self.bottoms.popleft()
+        if len(self.bottoms) < C.CALIB_MIN:
+            return
+        b = np.array([(y, w) for _, y, w in self.bottoms])
+        far = b[b[:, 1] < C.CALIB_FAR_WIDTH, 0]
+        if len(far) >= 8:
+            top = float(np.clip(np.percentile(far, 15) - 0.015, C.CALIB_TOP_RANGE[0], C.CALIB_TOP_RANGE[1]))
+            self.top = 0.9 * self.top + 0.1 * top
+        if self.bottoms[-1][0] - self.bottoms[0][0] >= C.CALIB_MIN_SPAN:
+            low = float(np.percentile(b[:, 0], 98)) + 0.05
+            hood = C.HOOD_Y if low >= C.HOOD_Y else max(low, self.top + 0.3)
+            self.hood = 0.9 * self.hood + 0.1 * hood
+
+    def _reputation(self, t, live, threats, raw, aspect):
+        """Remember cars that made risky manoeuvres (and cars changing lanes again and again) and, while such
+        a car is still close, add an "aggressive" threat on it: green after one episode, yellow after more."""
+        for th in threats:
+            # only manoeuvres that were confirmed alerts (would have been shown to the driver) mark a car
+            if th.kind in MARK_KINDS and th.kind in self.prev_active and th.level >= 2:
+                m = self.marks[th.det.tid]
+                if not m or t - m[-1][0] > C.MARK_GAP or m[-1][1] != th.kind:
+                    m.append((t, th.kind))
+        threatened = {th.det.tid for th in threats}
+        if self.dense:
+            return
+        for d in live:
+            if d.cls not in C.VEHICLE_CLASSES:
+                continue
+            h = self.hist[d.tid]
+            u = h[-1][5]
+            if u is not None and abs(u - round(u)) <= C.LANE_DEEP:   # lane changes: deep inside a new lane, kept
+                lane = int(round(u))
+                prev = self.lane_idx.get(d.tid)
+                if prev is None:
+                    self.lane_idx[d.tid] = (lane, t)
+                elif lane != prev[0]:
+                    if t - prev[1] >= C.LANE_STAY:
+                        self.marks[d.tid].append((t, "lanechange"))
+                    self.lane_idx[d.tid] = (lane, t)
+            m = [k for tt, k in self.marks.get(d.tid, []) if t - tt <= C.MARK_WINDOW and k in C.MARK_COUNTS]
+            score = sum(1.0 if k != "lanechange" else C.LANECHANGE_WEIGHT for k in m)
+            if score < 1.0 or d.tid in threatened:
+                continue
+            x1, y1, x2, y2 = h[-1][1:5]
+            sv = (x2 - x1) * aspect > C.CROSS_MIN_ASPECT * (y2 - y1)
+            dist = self._distance(d.cls, x2 - x1, y2 - y1, aspect, sv)
+            if dist is None or dist > C.MARK_DIST or y2 < self.top:
+                continue
+            level = 2 if score >= C.MARK_YELLOW else 1
+            threats.append(Threat(d, "aggressive", level, u, None, None, dist, None))
+            raw.add("aggressive")
+        self.marks = defaultdict(list, {k: v for k, v in self.marks.items() if k in self.hist})
+        self.lane_idx = {k: v for k, v in self.lane_idx.items() if k in self.hist}
+
+    def aggressive_count(self, tid, t):
+        """Risky manoeuvres a car made in the last MARK_WINDOW seconds (for the on-screen tag)."""
+        return sum(1 for tt, _ in self.marks.get(tid, []) if t - tt <= C.MARK_WINDOW)
+
+    def _steady_u(self, h, t, span=0.5, limit=None):
+        """The track exists for `span` seconds and stayed within `limit` lanes of our lane centre
+        (default WRONGWAY_U)."""
+        limit = C.WRONGWAY_U if limit is None else limit
+        pts = [p[5] for p in h if t - p[0] <= span and p[5] is not None]
+        return len(pts) >= 4 and max(abs(v) for v in pts) <= limit and h[-1][0] - h[0][0] >= span
+
+    @staticmethod
+    def _spin(h, t):
+        """How fast the box proportions change, |d ln(w/h)/dt| over KIN_WINDOW: a car turning its body."""
+        pts = [(p[0], math.log(max(p[3] - p[1], 1e-6) / max(p[4] - p[2], 1e-6))) for p in h if t - p[0] <= C.KIN_WINDOW]
+        if len(pts) < 4 or pts[-1][0] - pts[0][0] < C.KIN_MIN_SPAN:
+            return 0.0
+        ts, a = np.array(pts).T
+        return float(abs(np.polyfit(ts, a, 1)[0]))
+
+    def _certain(self, th, t):
+        """Physically certain imminent collision: a close car in our path with TTC < TTC_CERTAIN, critical for
+        at least CERTAIN_HOLD seconds (one jumpy box is not enough) - never lowered by the threat scorer."""
+        if th.kind != "ttc" or th.ttc is None or th.ttc >= C.TTC_CERTAIN:
+            return False
+        q = self.crit_hist.get(th.det.tid, ())
+        return len(q) >= 3 and t - q[0] >= C.CERTAIN_HOLD
+
+    def _threat_feat(self, th, h, t, side_view, in_path, inside, age):
+        """THREAT_FEATURES of one threat (scale-free: lanes, seconds, 1/TTC)."""
+        u, du, ttc = th.u, th.du, th.ttc
+        cls = self.cls.get(th.det.tid, th.det.cls)
+        pts = [(p[0], p[5]) for p in h if t - p[0] <= 1.0 and p[5] is not None]
+        jitter = 1.0
+        if len(pts) >= 4:
+            ts, us = np.array(pts).T
+            jitter = float(np.std(us - np.polyval(np.polyfit(ts, us, 1), ts)))
+        rate, _, _ = self._rate(h, t, by_height=side_view or cls not in C.VEHICLE_CLASSES)
+        toward = -math.copysign(1, u) * du if (u is not None and du is not None and u != 0) else 0.0
+        u_imp = abs(u + (du or 0.0) * ttc) if (u is not None and ttc is not None) else 3.0
+        f = [float(th.kind == k) for k in RULE_KINDS] + [
+            float(th.level), float(cls in C.VEHICLE_CLASSES), float(cls == C.PERSON_CLASS), float(cls in (1, 3)),
+            float(side_view), min(abs(u), 3.0) if u is not None else 3.0, float(np.clip(toward, -3, 3)),
+            min(abs(du), 3.0) if du is not None else 0.0, min(1 / ttc, 5.0) if ttc else 0.0, min(u_imp, 3.0),
+            min(age, 5.0), min(jitter, 1.0), float(np.clip(rate or 0.0, -2, 2)), float(in_path), float(not inside), 0.0]
+        return f
 
     # ================================================================ confirmation
     def _confirm(self, t, raw, threats):
@@ -379,16 +641,21 @@ class BehaviorEngine:
             if t - self.last_raw[kind] > C.RAW_GAP:
                 del self.since[kind]
         active = {k for k in self.since
-                  if t - self.last_raw[k] <= C.ALERT_HOLD and self.last_raw[k] - self.since[k] >= C.CONFIRM_SEC[k]}
+                  if t - self.last_raw[k] <= C.ALERT_HOLD + 1e-6
+                  and self.last_raw[k] - self.since[k] >= C.CONFIRM_SEC[k] - 1e-6}   # float times: 7.0 - 6.9 < 0.1
         if "ttc" in active:
             active.discard("closing")   # critical replaces ordinary closing
         if "cutin" in active:
             active.discard("drift")
+        self.prev_active = set(active)
         alerts = []
         for k in active:
             base, screen, voice = C.ALERTS[k]
             levels = [th.level for th in threats if th.kind == k]
-            alerts.append(Alert(k, max(levels) if levels else base, screen, voice))
+            if levels:
+                self.last_level[k] = max(levels)
+            # while an alert is only held (its threat blinked out for a moment) keep the last real level
+            alerts.append(Alert(k, self.last_level.get(k, base), screen, voice))
         return alerts
 
     # ================================================================ geometry
@@ -400,7 +667,7 @@ class BehaviorEngine:
             u = self.lanes.lane_pos(cx, y2)
             if u is not None:
                 return u
-        if y2 < C.CORRIDOR_TOP_Y:
+        if y2 < self.top:
             return None
         if cls in C.VEHICLE_CLASSES:
             meters = (cx - C.CORRIDOR_CENTER_X) / max(x2 - x1, 1e-6) * C.VEHICLE_WIDTH_M
@@ -538,7 +805,7 @@ class BehaviorEngine:
             dt = n[0] - o[0]
             w, h, w0, h0 = n[3] - n[1], n[4] - n[2], o[3] - o[1], o[4] - o[2]
             cut = min(o[1], n[1]) < C.EDGE_MARGIN or max(o[3], n[3]) > 1 - C.EDGE_MARGIN \
-                or (n[2] + n[4]) / 2 > C.HOOD_Y
+                or (n[2] + n[4]) / 2 > self.hood
             if cut or w < C.CRASH_MIN_WIDTH or h <= 0 or h0 <= 0:
                 continue
             rise = -(((n[2] + n[4]) - (o[2] + o[4])) / 2 - ego) / h / dt       # box heights per second
@@ -566,6 +833,9 @@ class BehaviorEngine:
         return on
 
     def _forget(self, t):
+        for q in self.crit_hist.values():
+            while q and t - q[0] > 1.0:
+                q.popleft()
         for tid in [k for k, seen in self.last_seen.items() if t - seen > C.TRACK_TTL]:
             del self.last_seen[tid]
             for store in (self.hist, self.cls, self.red_base, self.rates, self.first_seen):

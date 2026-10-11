@@ -20,7 +20,7 @@ import config as C
 
 AHEAD_DX = 0.15         # |centre - 0.5| below this (frame fraction): "ahead", not left/right
 SIDE_WORDS = {"left": "on the left", "right": "on the right", "ahead": "ahead"}
-SIDED = {"ped", "ped_xwalk", "vru_near", "cutin", "drift", "crossing"}   # phrases that get "on the left/right"
+SIDED = {"ped", "ped_xwalk", "vru_near", "cutin", "drift", "crossing", "aggressive"}   # phrases that get "on the left/right"
 
 
 @dataclass

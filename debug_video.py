@@ -53,9 +53,9 @@ def draw_debug(frame, res, t, fi, k=1.0):
     """k - how much the frame is scaled relative to the source (boxes are in source pixels)."""
     H, W = frame.shape[:2]
     if not ui.draw_lanes(frame, res.lanes, res.level):
-        cv2.polylines(frame, [corridor_polygon(W, H)], True, WHITE, 1, cv2.LINE_AA)
+        cv2.polylines(frame, [corridor_polygon(W, H, res.view)], True, WHITE, 1, cv2.LINE_AA)
     ui.draw_crosswalk(frame, res.crosswalk)
-    cv2.line(frame, (0, int(C.HOOD_Y * H)), (W, int(C.HOOD_Y * H)), (255, 120, 0), 1, cv2.LINE_AA)
+    cv2.line(frame, (0, int(res.view[1] * H)), (W, int(res.view[1] * H)), (255, 120, 0), 1, cv2.LINE_AA)
     lead_id = res.lead.tid if res.lead else None
     threat_ids = {th.det.tid for th in res.threats}
     for d, status in res.tracks:

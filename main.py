@@ -64,6 +64,7 @@ class Analyzer:
         # markings change slowly - on weak hardware they need not be searched on every analysis
         lanes = self.lanes.detect(frame) if self.lanes and self.n % C.LANE_EVERY == 0 else None
         ego = self.ego.update(t, frame, boxes, can_speed=self.can_speed)
+        ego = (*ego, self.can_speed is not None)        # only the vehicle bus is trusted for decisions
         kw = {}
         if C.CROSSWALK and self.n % C.CROSSWALK_EVERY == 0:
             kw["crosswalk"] = crosswalk.detect(frame, boxes)

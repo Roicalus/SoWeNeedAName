@@ -25,3 +25,13 @@ cache_coco/
 data/reels/
 data/bdd_det/
 models/risk_features*.npz
+cache_e5/
+data/highway/
+models/risk*.json
+models/risk*.txt
+models/yolo11m_bdd_e5.onnx
+tune_*.json
+cache_teh/
+cache_final/
+.claude/
+debug/

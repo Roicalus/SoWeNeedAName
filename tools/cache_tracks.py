@@ -93,7 +93,8 @@ def process(path, rate, out):
 
 def main():
     ap = argparse.ArgumentParser(description="Cache detections, lanes, crosswalks and own motion")
-    ap.add_argument("paths", nargs="+", help="videos or folders")
+    ap.add_argument("paths", nargs="*", help="videos or folders")
+    ap.add_argument("--list", help="text file with one video path per line")
     ap.add_argument("--out", default="cache")
     ap.add_argument("--rate", type=float, default=10, help="analyses per second")
     ap.add_argument("--model", default=None)
@@ -103,6 +104,8 @@ def main():
     args = ap.parse_args()
 
     videos = []
+    if args.list:
+        videos += [l.strip() for l in open(args.list, encoding="utf-8") if l.strip()]
     for p in args.paths:
         videos += [p] if os.path.isfile(p) else sorted(
             v for v in glob.glob(os.path.join(p, "*")) if v.lower().endswith(VIDEO_EXT))

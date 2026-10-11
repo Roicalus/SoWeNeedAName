@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Co-pilot · a calm second pair of eyes for any dashcam</title>
+  <meta name="description" content="Co-pilot watches the road through a dashcam or a phone and quietly hints the driver before things get dangerous: green - attention, yellow - possible risk, red - danger. Runs in your browser; nothing is uploaded." />
+  <meta name="theme-color" content="#141619" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23141619'/><g fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round'><path d='M30 43V34a12 12 0 0 1 12-12h28' stroke-width='7'/><path d='M70 55v9a12 12 0 0 1-12 12H30' stroke-width='7'/><path d='m45 42 10.5 7L45 56.5' stroke-width='4.6'/></g></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=3" />
+  <script>try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.min.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap bar">
+      <a href="#" class="brand"><svg viewBox="0 0 100 100" class="logo" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M30 43V34a12 12 0 0 1 12-12h28" stroke-width="7"/><path d="M70 55v9a12 12 0 0 1-12 12H30" stroke-width="7"/><path d="m45 42 10.5 7L45 56.5" stroke-width="4.6"/></svg><span>SoWeNeedAName</span><span class="sub">· Co-pilot</span></a>
+      <nav class="nav" aria-label="Main">
+        <a href="#demo">Live demo</a><a href="#how">How it works</a><a href="#results">Results</a><a href="#engineering">Engineering</a><a href="#data">Data</a>
+      </nav>
+      <div class="right">
+        <button id="theme" class="icon-btn" aria-label="Switch theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+        <a href="#demo" class="btn btn-primary btn-sm">Try it</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-glow">
+      <div class="wrap hero">
+        <div class="rise">
+          <p class="pill">WIUT Hackathon 2026 <span class="sep">|</span> Computer Vision · Startup</p>
+          <h1>A calm second pair of eyes for any dashcam</h1>
+          <p class="lead">Co-pilot watches the road and quietly hints the driver <b>before</b> things get dangerous: a car cutting in, the car ahead braking hard, a person stepping onto the road, a crash ahead. It is an assistant, not an alarm: most of the time it says nothing.</p>
+          <div class="levels">
+            <span class="lv lv1"><i></i>Green · attention</span>
+            <span class="lv lv2"><i></i>Yellow · possible risk</span>
+            <span class="lv lv3"><i></i>Red · danger</span>
+          </div>
+          <div class="actions">
+            <a href="#demo" class="btn btn-primary">Try it on your video</a>
+            <a href="https://github.com/Roicalus/SoWeNeedAName" class="btn btn-ghost" target="_blank" rel="noreferrer">Code on GitHub</a>
+          </div>
+        </div>
+        <div class="rise d1">
+          <figure class="hero-shot card">
+            <video src="samples/hero.mp4" autoplay muted loop playsinline poster="samples/hero.jpg"></video>
+            <figcaption><span class="label">Recorded output</span> the system on a real crash clip (DADA-2000): yellow "car ahead is braking hard", then red "Brake!" before impact.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <div class="wrap">
+      <dl class="card stats" id="stats">
+        <div><dd class="tnum" data-stat="recall">–</dd><dt>Crashes hinted in advance<span>held-out DADA-2000 test clips</span></dt></div>
+        <div><dd class="tnum" data-stat="lead">–</dd><dt>Median warning time<span>before the impact</span></dt></div>
+        <div><dd class="tnum" data-stat="false">–</dd><dt>Yellow/red situations in normal driving<span>BDD100K, per minute</span></dt></div>
+        <div><dd class="tnum" data-stat="speed">–</dd><dt>Per frame on a laptop GPU<span>runs on the device</span></dt></div>
+      </dl>
+    </div>
+
+    <section id="demo" class="wrap section">
+      <div class="head">
+        <h2>Live demo</h2>
+        <p>Open a dashcam clip from your phone or laptop, or point the phone camera at the road. The neural network runs <b>inside your browser</b> (WebGPU or WebAssembly) — the video never leaves your device.</p>
+      </div>
+      <div class="demo">
+        <div class="stage-col">
+          <div class="toolbar">
+            <div class="seg" role="tablist" aria-label="View">
+              <button id="mode-driver" class="on" role="tab">Driver view</button>
+              <button id="mode-system" role="tab">How the system sees it</button>
+            </div>
+            <div class="tools">
+              <button id="voice" class="btn btn-ghost btn-sm" title="Voice on / off">Voice: on</button>
+              <span id="backend" class="label">loading…</span>
+            </div>
+          </div>
+          <div class="stage" id="stage">
+            <video id="video" playsinline muted></video>
+            <canvas id="view"></canvas>
+            <div id="advice" class="advice"></div>
+            <div id="hint" class="hint"></div>
+            <div id="hud" class="hud"></div>
+            <div id="intro" class="intro">
+              <div>
+                <h3>Choose a video</h3>
+                <p>Any front dashcam clip works: day or night, city or highway.</p>
+                <div class="actions center">
+                  <label class="btn btn-primary">Open a video<input id="file" type="file" accept="video/*" hidden /></label>
+                  <button id="camera" class="btn btn-ghost">Use the camera</button>
+                </div>
+                <p class="samples">Or a sample:
+                  <button data-sample="samples/crash_brake.mp4">Car ahead brakes · crash</button>
+                  <button data-sample="samples/krakow_peds.mp4">City · pedestrians</button>
+                  <button data-sample="samples/urban.mp4">Calm city drive</button>
+                </p>
+                <p id="status" class="status">Loading the model…</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <aside class="card side">
+          <p class="label">What it told the driver</p>
+          <ol id="log"></ol>
+          <div class="legend">
+            <div><i class="g1"></i><b>Green</b> — worth watching: a car drifting towards your lane, too close to the car ahead, a driver who already made a risky move.</div>
+            <div><i class="g2"></i><b>Yellow</b> — possible risk: cut-in, hard braking ahead, someone stepping onto the road, a car crossing your path.</div>
+            <div><i class="g3"></i><b>Red</b> — danger: collision about a second away, a crash ahead, a wrong-way car.</div>
+            <p class="small">People on the pavement, parked cars and traffic you are not driving into are ignored on purpose. Hints are rationed so the driver does not learn to tune them out.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="how" class="wrap section">
+      <div class="head">
+        <h2>How it works</h2>
+        <p>One camera, no calibration, about ten analyses a second. Only the perception models are learned; every decision after them is geometry we can explain and test.</p>
+      </div>
+      <ol class="steps">
+        <li><span class="num">01</span><h3>See</h3><p>YOLO11m, fine-tuned by us on 70 000 BDD100K dashcam frames (40% at night), finds cars, trucks, buses, bikes and people; a ByteTrack-style tracker links them.</p></li>
+        <li><span class="num">02</span><h3>Place</h3><p>A lane network (UFLDv2) finds our lane; the horizon and hood are calibrated per camera from the traffic itself; a zebra detector marks crosswalks; optical flow of the far background gives our own turning.</p></li>
+        <li><span class="num">03</span><h3>Predict</h3><p>For every road user: time to collision from box growth, lateral speed in lanes per second, and where it will be when we reach it. A constant bearing means a collision course.</p></li>
+        <li><span class="num">04</span><h3>Decide</h3><p>Explicit rules turn that into hints: cut-in, crossing, hard braking ahead, pedestrian on our path, crash in view, wrong-way car. Cars that keep making risky moves are remembered and flagged as aggressive drivers. Parked cars and people on the pavement are filtered out.</p></li>
+        <li><span class="num">05</span><h3>Tell</h3><p>An advisor picks the colour, the side and one short phrase, with a budget per level: red speaks at once, yellow at most every few seconds, green mostly just glows.</p></li>
+      </ol>
+    </section>
+
+    <section id="results" class="wrap section">
+      <div class="head">
+        <h2>Results, measured honestly</h2>
+        <p>Crash clips: the held-out test half of DADA-2000 (never used for tuning); a crash counts as hinted if a yellow or red hint started between 3 s before the labelled start of the danger and the impact. Normal driving: BDD100K and long highway drives — every yellow or red situation there is unnecessary for the driver. "Spoken" is what the driver actually hears after the advisor's budget.</p>
+      </div>
+      <div class="card table-card"><table id="results-table"><thead><tr><th>Set</th><th>Clips</th><th>Crash hinted in advance (yellow+)</th><th>Median warning time</th><th>Red in advance</th><th>Yellow+ situations / min</th><th>Red / min</th><th>Spoken hints / min</th></tr></thead><tbody><tr><td colspan="8" class="muted">loading…</td></tr></tbody></table></div>
+      <div class="card table-card"><table id="detector-table"><thead><tr><th>Detector (BDD100K val, 10 000 frames)</th><th>Day AP50 vehicles</th><th>Night AP50 vehicles</th><th>Day AP50 people</th><th>Night AP50 people</th></tr></thead><tbody><tr><td colspan="5" class="muted">loading…</td></tr></tbody></table></div>
+      <div class="grid2">
+        <div class="card pad"><p class="label">Known failure cases</p><ul class="list" id="failures">
+          <li>Loss of control without braking (a car spinning) is not detected as such — only when it ends up in our path.</li>
+          <li>Heavily distorted fisheye cameras: lateral speed is less accurate, so cut-ins are hinted later.</li>
+          <li>Motorbikes weaving between lanes in dense Asian traffic: boxes are small and jumpy; many are hinted only at close range.</li>
+          <li>Without a speed signal from the car, "we are standing still" is inferred from the image; with CAN speed it is exact.</li>
+          <li>Night without street lights: the detector sees headlights rather than cars beyond ~30 m.</li>
+        </ul></div>
+        <div class="card pad"><p class="label">What we measured it on</p><ul class="list">
+          <li><b>DADA-2000</b>: 1 714 real crash clips from dashcams (China), each labelled with the start of the danger and the crash frame; split into tune / test halves.</li>
+          <li><b>BDD100K</b>: 150 videos of normal driving (New York, San Francisco; day, night, rain) — every yellow or red hint there counts as false.</li>
+          <li><b>BDD100K images</b>: 70 000 labelled frames to fine-tune the detector, 10 000 held out for the AP numbers.</li>
+        </ul></div>
+      </div>
+    </section>
+
+    <section id="engineering" class="wrap section">
+      <div class="head"><h2>Engineering</h2><p>Built to run on the device in the car, not in a cloud.</p></div>
+      <div class="grid3">
+        <div class="card pad"><p class="label">Where inference runs</p><p>On the device: the browser (WebGPU / WASM), a laptop (ONNX Runtime with CUDA, DirectML or CPU), or an automotive SoC that imports ONNX. No video leaves the car, no server cost.</p></div>
+        <div class="card pad"><p class="label">Speed</p><p id="speed-text">Measured on an Intel i5-10400F + RTX 4070 Ti: detector, lanes, crosswalk and logic together ≈ <b data-stat="speed">–</b> per analysis at 10 analyses/s. The browser uses a lighter detector so phones keep up.</p></div>
+        <div class="card pad"><p class="label">Cost per car</p><p>Software only: runs on the head unit or a $40–60 dashcam-class SoC. For a phone app the marginal cost is zero. Detail and payback in the deck.</p></div>
+        <div class="card pad"><p class="label">Night and rain</p><p>The detector was fine-tuned with 40% night frames; numbers by time of day and weather are in the results above.</p></div>
+        <div class="card pad"><p class="label">Local roads</p><p>Damas, Nexia, Cobalt, Labo and city buses are ordinary car / bus / truck classes for the detector. Lanes and horizon calibrate per camera, so any mounting works.</p></div>
+        <div class="card pad"><p class="label">Privacy</p><p>Frames are processed and dropped on the device; nothing is stored or uploaded. Event clips are saved only in the desktop app, locally, for the owner.</p></div>
+      </div>
+    </section>
+
+    <section id="data" class="wrap section">
+      <div class="head"><h2>Data and licences</h2></div>
+      <div class="card table-card"><table><thead><tr><th>Source</th><th>Used for</th><th>Licence</th></tr></thead><tbody>
+        <tr><td><a class="link" href="https://github.com/bdd100k/bdd100k" target="_blank" rel="noreferrer">BDD100K</a> images, boxes, videos</td><td>detector fine-tuning (70k frames), false-alarm measurement (150 videos)</td><td>BAIR BDD100K licence: research and education; commercial use needs a licence from UC Berkeley</td></tr>
+        <tr><td><a class="link" href="https://github.com/JWFangit/LOTVS-DADA" target="_blank" rel="noreferrer">DADA-2000</a></td><td>1 714 crash clips with danger / crash labels: tuning and the held-out test</td><td>research use, citation requested by the authors</td></tr>
+        <tr><td><a class="link" href="https://github.com/ultralytics/ultralytics" target="_blank" rel="noreferrer">YOLO11</a> COCO weights</td><td>starting point of the detector</td><td>AGPL-3.0</td></tr>
+        <tr><td><a class="link" href="https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2" target="_blank" rel="noreferrer">UFLDv2</a> (CULane, ONNX by PINTO)</td><td>lane lines</td><td>MIT</td></tr>
+        <tr><td>Wikimedia Commons clips (Kraków CC BY 3.0, German city CC0, TeslaCam PD)</td><td>samples on this page</td><td>as stated</td></tr>
+      </tbody></table></div>
+    </section>
+  </main>
+
+  <footer class="foot"><div class="wrap fbar">
+    <span class="brand small"><svg viewBox="0 0 100 100" class="logo" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M30 43V34a12 12 0 0 1 12-12h28" stroke-width="7"/><path d="M70 55v9a12 12 0 0 1-12 12H30" stroke-width="7"/><path d="m45 42 10.5 7L45 56.5" stroke-width="4.6"/></svg>SoWeNeedAName · WIUT Hackathon 2026</span>
+    <span class="muted">Code under AGPL-3.0 · <span id="build"></span></span>
+  </div></footer>
+  <script type="module" src="js/app.js?v=3"></script>
+</body>
+</html>
