@@ -147,6 +147,18 @@ WebGPU work on localhost. For a fully offline demo run `python tools/get_ort.py`
 onnxruntime-web from `web/vendor/ort` instead of the CDN. GitHub Pages deploys the same `web/` on every push
 to `main` (`.github/workflows/pages.yml`).
 
+**GitHub Pages setup:** Settings → Pages → Source: **GitHub Actions** (then the workflow publishes `web/` at the
+site root). If the source is "Deploy from a branch" instead, the root `index.html` redirects to `web/` and
+`.nojekyll` stops Jekyll from rendering the README in place of the site.
+
+**Videos on the site** ("Recorded on real clips"): pre-rendered by the Python pipeline, so they play on any
+device, whatever its speed. Each clip gets a driver view with sound and a "how the system sees it" view:
+```bash
+python tools/render_site.py clip.mp4 --id myclip --title "Title" --caption "What happens" [--start 60 --dur 30]
+```
+It writes `web/renders/<id>_driver.mp4`, `<id>_system.mp4`, `<id>.jpg` and the card in `web/data/reels.json`;
+commit them. Render on the PC with the lane model so the videos match the published numbers.
+
 **Desktop app and evaluation (Python 3.10–3.12):**
 ```bash
 python -m venv .venv && .venv\Scripts\activate

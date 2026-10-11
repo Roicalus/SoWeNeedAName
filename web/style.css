@@ -131,6 +131,13 @@ table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: .7rem 1rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-weight: 500; color: var(--ink-3); font-size: 12.5px; background: var(--panel-2); }
 tr:last-child td { border-bottom: 0; } td.num { font-variant-numeric: tabular-nums; }
+.reels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1rem; }
+.reel { margin: 0; overflow: hidden; display: flex; flex-direction: column; }
+.reel video { display: block; width: 100%; height: auto; max-height: 80vh; background: #000; }
+.reel-bar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem 1rem 0; flex-wrap: wrap; }
+.reel h3 { font-size: 15px; font-weight: 600; }
+.reel figcaption { padding: .5rem 1rem .9rem; font-size: 13.5px; color: var(--ink-2); }
+.reel .seg button { font-size: 12.5px; padding: .3rem .7rem; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
 .grid3 p, .grid2 p { font-size: 14.5px; color: var(--ink-2); }

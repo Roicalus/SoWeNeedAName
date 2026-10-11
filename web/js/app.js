@@ -31,6 +31,32 @@ $("theme").addEventListener("click", () => {
 });
 fetch("data/results.json").then((r) => (r.ok ? r.json() : null)).then(fillResults).catch(() => {});
 fetch("build.json").then((r) => r.json()).then((b) => { $("build").textContent = `build ${b.commit}`; }).catch(() => {});
+fetch("data/reels.json").then((r) => (r.ok ? r.json() : [])).then(fillReels).catch(() => {});
+
+// Pre-rendered clips (tools/render_site.py): one card per clip, "driver" view with sound and "system" view.
+function fillReels(reels) {
+  const box = $("reels");
+  if (!reels.length) { $("recorded").hidden = true; return; }
+  for (const r of reels) {
+    const fig = document.createElement("figure");
+    fig.className = "reel card";
+    const views = Object.entries(r.views);
+    fig.innerHTML = `<video controls playsinline preload="metadata" poster="${r.poster || ""}" src="${views[0][1]}"></video>
+      <div class="reel-bar"><h3></h3>${views.length > 1 ? `<div class="seg" role="tablist">${views.map(([k], i) =>
+        `<button data-view="${k}" class="${i ? "" : "on"}">${k === "driver" ? "Driver view" : "How the system sees it"}</button>`).join("")}</div>` : ""}</div>
+      <figcaption></figcaption>`;
+    fig.querySelector("h3").textContent = r.title;
+    fig.querySelector("figcaption").textContent = r.caption;
+    const v = fig.querySelector("video");
+    fig.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => {
+      const t = v.currentTime, playing = !v.paused;
+      v.src = r.views[b.dataset.view];
+      v.addEventListener("loadedmetadata", () => { v.currentTime = Math.min(t, v.duration || t); if (playing) v.play(); }, { once: true });
+      fig.querySelectorAll("[data-view]").forEach((x) => x.classList.toggle("on", x === b));
+    }));
+    box.append(fig);
+  }
+}
 
 function fillResults(R) {
   if (!R) return;
