@@ -817,11 +817,13 @@ class BehaviorEngine:
             if cut or young or w < C.CRASH_MIN_WIDTH or h <= 0 or h0 <= 0:
                 continue
             rise = -(((n[2] + n[4]) - (o[2] + o[4])) / 2 - ego) / h / dt       # box heights per second
+            bottom = -(n[4] - o[4] - ego) / h / dt     # a lifted car leaves the road; a box only stretched up does not
             taller = math.log((h / w) / (h0 / w0)) / dt
             scale = math.log(w / w0) / dt
             if abs(scale) < C.CRASH_MAX_SCALE:
                 self.crash_rise = max(self.crash_rise, min(rise, 3.0) * float(taller > 0))
-            if rise >= C.CRASH_RISE and taller >= C.CRASH_ASPECT and abs(scale) < C.CRASH_MAX_SCALE:
+            if rise >= C.CRASH_RISE and taller >= C.CRASH_ASPECT and abs(scale) < C.CRASH_MAX_SCALE \
+                    and bottom >= C.CRASH_BOTTOM_RISE:
                 out.append(tid)
         return out
 

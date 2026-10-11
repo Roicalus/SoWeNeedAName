@@ -90,6 +90,8 @@ CRASH_WINDOW = 0.4            # compare the box over this many seconds
 CRASH_RISE = 0.7              # box rose faster than 0.6 of its height per second (ego pitch removed)
 CRASH_ASPECT = 0.5            # and became taller relative to width (ln(h/w) grows > 0.5 per second)
 CRASH_MAX_SCALE = 0.5         # while the width barely changed (not driving away or approaching)
+CRASH_BOTTOM_RISE = 0.25      # and the box bottom left the road too (box heights per second); a box that only
+                              # stretches upward is the detector merging shadow or glare, not a lifted car
 CRASH_MIN_WIDTH = 0.06        # small far boxes are too noisy
 CRASH_HOLD = 3.0              # keep the alarm this long after crash signs
 CRASH_MIN_AGE = 1.0           # only tracks seen at least this long (s) can show crash signs

@@ -84,11 +84,11 @@ start of the danger and the crash. In normal driving every yellow or red hint co
 
 | Normal driving | Yellow+ situations / min | Red / min | Spoken hints / min |
 |---|---|---|---|
-| Normal driving (BDD100K) · 46 min | 1.88 | 0.81 | 2.27 |
-| Normal driving · day · 29 min | 1.87 | 0.94 | 2.36 |
+| Normal driving (BDD100K) · 46 min | 1.88 | 0.81 | 2.18 |
+| Normal driving · day · 29 min | 1.87 | 0.94 | 2.29 |
 | Normal driving · night · 14 min | 1.53 | 0.44 | 1.53 |
-| Normal driving · dawn/dusk · 3 min | 3.29 | 1.20 | 4.49 |
-| Highway in dense traffic (Tehran) · 5 min | 2.07 | 0.62 | 2.07 |
+| Normal driving · dawn/dusk · 3 min | 3.29 | 1.20 | 3.89 |
+| Highway in dense traffic (Tehran) · 5 min | 1.86 | 0.41 | 1.86 |
 | Highway (VW POV) · 9 min | 0.11 | 0.00 | 0.11 |
 | Small town + motorway (Austria) · 4 min | 1.91 | 1.64 | 4.09 |
 | Calm city drive (Germany) · 1 min | 0.00 | 0.00 | 0.00 |

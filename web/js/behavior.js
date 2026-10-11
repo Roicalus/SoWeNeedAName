@@ -398,8 +398,10 @@ export class BehaviorEngine {
       const young = t - (this.firstSeen.get(tid) ?? t) < C.CRASH_MIN_AGE;
       if (cut || young || w < C.CRASH_MIN_WIDTH || h <= 0 || h0 <= 0) continue;
       const rise = -(((n[2] + n[4]) - (o[2] + o[4])) / 2 - ego) / h / dt;
+      const bottom = -(n[4] - o[4] - ego) / h / dt;   // a lifted car leaves the road; a box only stretched up does not
       const taller = Math.log((h / w) / (h0 / w0)) / dt, scale = Math.log(w / w0) / dt;
-      if (rise >= C.CRASH_RISE && taller >= C.CRASH_ASPECT && Math.abs(scale) < C.CRASH_MAX_SCALE) out.push(tid);
+      if (rise >= C.CRASH_RISE && taller >= C.CRASH_ASPECT && Math.abs(scale) < C.CRASH_MAX_SCALE
+          && bottom >= C.CRASH_BOTTOM_RISE) out.push(tid);
     }
     return out;
   }

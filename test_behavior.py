@@ -190,6 +190,18 @@ def test_far_crash_is_yellow():
     assert seen(out[60:], "crash", 2) and not seen(out, "crash", 3)
 
 
+def test_box_stretched_into_shadow_not_crash():
+    """Under a bridge the detector merges the car with the shadow above it: the box top shoots up,
+    the bottom stays on the road. That is not a car leaving the ground."""
+    frames = []
+    for i in range(90):
+        k = max(0, i - 60) / FPS
+        w, x1, y2 = 0.12 * W, 0.6 * W, 0.62 * H
+        h = 0.8 * w * (1 + 4.0 * k)
+        frames.append([Detection((x1, y2 - h, x1 + w, y2), 2, 7), car(0.3, 0.05, tid=8, bottom=0.6)])
+    assert not seen(run(frames), "crash")
+
+
 def test_car_driving_away_not_crash():
     frames = []
     for i in range(90):
