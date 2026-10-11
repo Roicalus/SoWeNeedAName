@@ -20,13 +20,13 @@
     }
   },
   {
-    "id": "krakow",
-    "title": "City · dense traffic",
-    "caption": "Kraków (CC BY 3.0).",
-    "poster": "renders/krakow.jpg",
+    "id": "seoul",
+    "title": "Night · Seoul expressway",
+    "caption": "Seoul at night, dense traffic (YouTube · Seoul Walker): nothing dangerous happens, Co-pilot stays quiet.",
+    "poster": "renders/seoul.jpg",
     "views": {
-      "driver": "renders/krakow_driver.mp4",
-      "system": "renders/krakow_system.mp4"
+      "driver": "renders/seoul_driver.mp4",
+      "system": "renders/seoul_system.mp4"
     }
   }
 ]

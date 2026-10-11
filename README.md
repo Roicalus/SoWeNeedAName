@@ -136,6 +136,7 @@ In the browser the lighter YOLO11n runs on WebGPU/WASM; phones get a 320 px inpu
 | [YOLO11](https://github.com/ultralytics/ultralytics) COCO weights | starting point of the detector | AGPL-3.0 (this repository is AGPL-3.0 too) |
 | [UFLDv2](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2), CULane ResNet-18, ONNX from [PINTO model zoo](https://github.com/PINTO0309/PINTO_model_zoo) | lane lines | MIT |
 | Wikimedia Commons: [Kraków city drive](https://commons.wikimedia.org/wiki/File:City_Driving_4K-_Krak%C3%B3w_Poland_2024.webm) (CC BY 3.0), [German city](https://commons.wikimedia.org/wiki/File:Dashcam_Recording_(urban).ogv) (CC0), [TeslaCam crash](https://commons.wikimedia.org/wiki/File:INSANE_Car_Crash_caught_on_TeslaCam-_Kia_Soul_flying_through_air!.webm) (PD) | samples and checks | as stated |
+| YouTube: [Night Driving Seoul City](https://youtu.be/40xZVEFVBuE) (Seoul Walker), first 20 min at 360p | 16-minute night check on a real drive; a 60 s render (8:10–9:10) on the site | standard YouTube licence, credited on the site |
 | Public social-media driving clips (7) | internal checks only (`tools/prepare_reels.py`), **not published** — they show plates and people who did not consent | not redistributed |
 
 No personal data is collected: frames are processed and dropped on the device.
