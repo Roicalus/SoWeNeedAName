@@ -135,13 +135,14 @@ export class BehaviorEngine {
       const inPath = u !== null && Math.abs(u) <= (vehicle ? C.IMPACT_U_CAR : C.IMPACT_U) && ahead && inCorr;
       const toward = u !== null && du !== null && u !== 0 ? -Math.sign(u) * du : 0;
       const age = t - this.firstSeen.get(d.tid);
+      const closingSpeed = dist !== null && ttc ? dist / ttc : 0;   // fast approach, not just a small TTC
       const found = [];
       if (vehicle && inLane && inside && (lead === null || y2 > this.hist.get(lead.tid).at(-1)[4])) lead = d;
 
       // cut-in / crossing / drift
       if (u !== null && du !== null && ahead && whole && !inLane && Math.abs(u) <= C.CUTIN_MAX_U && age >= C.CUTIN_MIN_AGE) {
         const tIn = toward > 0 ? (Math.abs(u) - C.IN_LANE) / toward : null;
-        const closingIn = (ttc !== null && ttc <= C.CUTIN_TTC) || (dist !== null && dist <= C.CRIT_DIST);
+        const closingIn = (ttc !== null && ttc <= C.CUTIN_TTC && closingSpeed >= C.MIN_CLOSING) || (dist !== null && dist <= C.CRIT_DIST);
         if (vehicle && closingIn && dist <= C.CUTIN_MAX_DIST && toward >= C.CUTIN_MIN_SPEED + slack && tIn !== null && tIn <= C.CUTIN_HORIZON
             && (!turning || (ttc !== null && ttc < C.TTC_CRITICAL))) {
           const crit = ttc !== null && ttc < C.CUTIN_CRIT_TTC && dist <= C.CUTIN_CRIT_DIST;
@@ -153,8 +154,8 @@ export class BehaviorEngine {
       // pedestrians and two-wheelers: only if we are driving towards them
       if (!vehicle && dist !== null && ahead) {
         let lvl = 0;
-        const approaching = ttc !== null && ttc <= C.PED_TTC;
-        if (inPath && dist <= C.VRU_NEAR && approaching) lvl = ttc < C.TTC_CRITICAL ? 3 : 2;
+        const approaching = ttc !== null && ttc <= C.PED_TTC && closingSpeed >= C.PED_MIN_CLOSING;
+        if (inPath && dist <= C.VRU_NEAR && approaching) lvl = ttc < C.TTC_CRITICAL && dist <= C.PED_RED_DIST ? 3 : 2;
         else if (u !== null && du !== null && !inLane && toward >= C.VRU_MIN_SPEED && Math.abs(u) <= C.VRU_STEP_U && age >= C.CUTIN_MIN_AGE) {
           const tIn = (Math.abs(u) - C.IN_LANE) / toward;
           if (ttc !== null && ttc <= C.CUTIN_TTC && dist <= C.VRU_DIST && tIn <= C.VRU_HORIZON && this.steadyU(h, t, 0.5, 9))
@@ -165,27 +166,30 @@ export class BehaviorEngine {
       }
       // collision course: u + du * TTC inside our track
       if (ttc !== null && u !== null && ahead && dist !== null && dist <= C.COURSE_MAX_DIST && ttc <= C.COURSE_TTC
+          && closingSpeed >= (vehicle ? C.MIN_CLOSING : C.PED_MIN_CLOSING)
           && !(vehicle && inPath && !sideView) && !found.length && !(vehicle && turning && ttc >= C.TTC_CRITICAL) && (whole || !vehicle)) {
         const uImp = u + (du || 0) * ttc;
         const movingIn = toward >= C.COURSE_MIN_TOWARD + slack || (sideView && inPath);
         if (Math.abs(uImp) <= C.IMPACT_U && (du !== null || Math.abs(u) <= C.IMPACT_U) && (movingIn || (!vehicle && (toward >= C.COURSE_MIN_TOWARD || inPath)))) {
           const kind = !vehicle ? "ped" : sideView ? "crossing" : "cutin";
           const crit = ttc < C.CUTIN_CRIT_TTC && dist <= C.CUTIN_CRIT_DIST;
-          found.push([kind, crit || (!vehicle && ttc < C.TTC_CRITICAL) ? 3 : 2]);
-          if (kind === "ped") res.peds.push(d);
+          if (vehicle || dist <= C.PED_COURSE_DIST) {
+            found.push([kind, crit ? 3 : 2]);
+            if (kind === "ped") res.peds.push(d);
+          }
         }
       }
       // car in our path closing in fast
       if (vehicle && inPath && inside && !sideView && ttc !== null && w >= C.TTC_MIN_WIDTH) {
         const closing = dist ? dist / ttc : 0;
         if (closing > C.LEAD_MAX_CLOSING) { if (d === lead) res.oncoming = true; }
-        else if (ttc < C.TTC_WARNING) {
-          const crit = ttc < C.TTC_CRITICAL && w >= C.CRITICAL_MIN_WIDTH;
+        else if (ttc < C.TTC_WARNING && closing >= C.MIN_CLOSING) {
+          const crit = ttc < C.TTC_CRITICAL && w >= C.CRITICAL_MIN_WIDTH && closing >= C.BRAKE_MIN_CLOSING;
           if (crit) { const q = this.critHist.get(d.tid) || []; q.push(t); this.critHist.set(d.tid, q); }
           found.push(crit ? ["ttc", 3] : ["closing", 2]);
         }
       }
-      if (this.dense) for (const f of found) if (["cutin", "crossing", "drift"].includes(f[0]) && f[1] < 3) f[1] = 1;
+      if (this.dense) for (const f of found) if (["cutin", "crossing", "drift"].includes(f[0])) f[1] = Math.max(1, f[1] - 1);
       for (const [kind, level] of found) {
         threats.push({ det: d, kind, level, u, du, ttc, dist, path: this.predict(h, u, du) });
         raw.add(kind);
@@ -391,7 +395,8 @@ export class BehaviorEngine {
     for (const [tid, [o, n]] of pairs) {
       const dt = n[0] - o[0], w = n[3] - n[1], h = n[4] - n[2], w0 = o[3] - o[1], h0 = o[4] - o[2];
       const cut = Math.min(o[1], n[1]) < C.EDGE_MARGIN || Math.max(o[3], n[3]) > 1 - C.EDGE_MARGIN || (n[2] + n[4]) / 2 > this.hood;
-      if (cut || w < C.CRASH_MIN_WIDTH || h <= 0 || h0 <= 0) continue;
+      const young = t - (this.firstSeen.get(tid) ?? t) < C.CRASH_MIN_AGE;
+      if (cut || young || w < C.CRASH_MIN_WIDTH || h <= 0 || h0 <= 0) continue;
       const rise = -(((n[2] + n[4]) - (o[2] + o[4])) / 2 - ego) / h / dt;
       const taller = Math.log((h / w) / (h0 / w0)) / dt, scale = Math.log(w / w0) / dt;
       if (rise >= C.CRASH_RISE && taller >= C.CRASH_ASPECT && Math.abs(scale) < C.CRASH_MAX_SCALE) out.push(tid);

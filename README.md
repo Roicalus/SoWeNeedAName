@@ -67,13 +67,51 @@ Thresholds were tuned on the *tune* half of the data; everything below is on the
 system never saw while tuning. A hint counts as in advance if it comes between 3 s before the labelled
 start of the danger and the crash. In normal driving every yellow or red hint counts as false.
 
-RESULTS_TABLE
+| Crash clips (held-out) | Clips | Hinted in advance (yellow+) | Median warning time | Red in advance |
+|---|---|---|---|---|
+| Crashes (DADA-2000 test) | 371 | 32% | 1.1 s | 20% |
+| Crashes · day | 339 | 32% | 1.1 s | 20% |
+| Crashes · night | 32 | 31% | 1.0 s | 19% |
+| Crashes · rain / snow / fog | 29 | 17% | 0.8 s | 14% |
+| Aggressive-driving clips (social media, test half) | 7 | 86% | 2.0 s | 86% |
+| Crashes · crossing | 70 | 26% | 1.4 s | 13% |
+| Crashes · cut in | 70 | 20% | 1.0 s | 11% |
+| Crashes · lead stop | 70 | 40% | 1.1 s | 34% |
+| Crashes · loss | 70 | 30% | 1.2 s | 20% |
+| Crashes · oncoming | 15 | 40% | 0.6 s | 27% |
+| Crashes · other | 6 | 17% | 5.4 s | 17% |
+| Crashes · vru | 70 | 43% | 1.2 s | 19% |
+
+| Normal driving | Yellow+ situations / min | Red / min | Spoken hints / min |
+|---|---|---|---|
+| Normal driving (BDD100K) · 46 min | 1.88 | 0.81 | 2.27 |
+| Normal driving · day · 29 min | 1.87 | 0.94 | 2.36 |
+| Normal driving · night · 14 min | 1.53 | 0.44 | 1.53 |
+| Normal driving · dawn/dusk · 3 min | 3.29 | 1.20 | 4.49 |
+| Highway in dense traffic (Tehran) · 5 min | 2.07 | 0.62 | 2.07 |
+| Highway (VW POV) · 9 min | 0.11 | 0.00 | 0.11 |
+| Small town + motorway (Austria) · 4 min | 1.91 | 1.64 | 4.09 |
+| Calm city drive (Germany) · 1 min | 0.00 | 0.00 | 0.00 |
+| City with pedestrians (Kraków) · 1 min | 4.01 | 0.00 | 2.67 |
+
+How to read it: on a normal motorway the assistant almost never speaks (0.1 situations a minute); in dense
+city traffic (New York, San Francisco) it flags about two situations a minute, mostly real close calls
+in stop-and-go traffic. On real crashes it hints about a third of them in advance — the price of being
+quiet; with looser thresholds (our earlier versions) it caught 63–74 % but spoke 8–11 times a minute in
+normal driving, which drivers would switch off. "Lead stop" (car ahead brakes) and pedestrians /
+motorbikes are caught best; crashes in rain and cut-ins worst. DADA clips are short (the danger starts
+~6 s after the clip start, median 1.5 s before the impact), so warning times are short by construction.
 
 **Detector** (BDD100K official val, 10 000 frames never used in training, AP50):
 
-DETECTOR_TABLE
+| Weights | Vehicles · day | Vehicles · night | People · day | People · night |
+|---|---|---|---|---|
+| YOLO11m COCO weights (before) | 0.694 | 0.544 | 0.577 | 0.467 |
+| YOLO11m fine-tuned on BDD100K (ours) | 0.819 | 0.772 | 0.665 | 0.600 |
 
-**Speed** (Intel i5-10400F + RTX 4070 Ti, ONNX Runtime + DirectML): SPEED_TEXT
+Fine-tuning on BDD100K (69 863 frames, 40 % night, 13 epochs on an RTX 4070 Ti) adds +12 points for vehicles by day and **+23 points at night**.
+
+**Speed** (Intel i5-10400F + RTX 4070 Ti, ONNX Runtime + DirectML): the whole pipeline (detector 15 ms, lanes 25 ms, crosswalk, optical flow, tracking and rules) takes **57 ms per analysis** (median, p90 65 ms) = 17 analyses/s; the logic needs 10. Cost per car: software only, no server; on a dashcam-class SoC the 320-px detector is the target.
 In the browser the lighter YOLO11n runs on WebGPU/WASM; phones get a 320 px input.
 
 **Known failure cases**
@@ -84,6 +122,10 @@ In the browser the lighter YOLO11n runs on WebGPU/WASM; phones get a 320 px inpu
 * Own speed from video is rough (the hood and reflections pull it down); decisions that need it
   ("we stand still", "that car is parked") use it only when the speed comes from the vehicle (CAN).
 * Night without street lights: beyond ~30 m the detector sees headlights rather than cars.
+* Narrow streets with parked vans: a parked van right at the edge of our lane can still trigger "Brake!"
+  when we approach it fast (without a speed signal from the car it looks like a stopped car in our lane).
+* Distances assume a 70° camera; very wide phone / fisheye cameras underestimate them, so the
+  dense-traffic mode and the closing-speed thresholds are less accurate there.
 
 ## Data and licences
 | Source | Used for | Licence |
@@ -110,7 +152,7 @@ pip install -r requirements.txt            # onnxruntime-directml / onnxruntime-
 python main.py data/videos/krakow_peds.mp4 # window with voice and event recording
 python main.py 0                           # webcam
 python main.py clip.mp4 --can-speed 50     # speed from the vehicle bus, km/h
-python test_behavior.py                    # 27 logic tests on synthetic tracks
+python test_behavior.py                    # 29 logic tests on synthetic tracks
 python debug_video.py clip.mp4 --demo      # render a demo video with sound (driver view)
 python debug_video.py clip.mp4             # full debug view: tracks, plots, raw / confirmed alerts
 ```
@@ -148,7 +190,8 @@ python tools/tune.py --iters 80                    # automatic threshold search 
   clip is from (track age, camera geometry) rather than danger. With dataset-revealing features removed it
   reached AUC ≈ 0.72 on held-out clips — not enough to ship. The fix is crash and normal clips from the
   same cameras (Nexar collision dataset, access pending).
-* **Skid detection** from box proportions: our own turning changes how other cars look; switched off.
+* **Skid detection** from box proportions and **weaving** of the car ahead from its box oscillation: our own
+  steering and road curves make parked cars look like they skid or weave; both switched off.
 * **Own speed from optical flow**: too rough for decisions; kept as a feature only.
 
 ## Prior work (declared)

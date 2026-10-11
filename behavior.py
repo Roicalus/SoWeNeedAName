@@ -277,6 +277,8 @@ class BehaviorEngine:
             in_lane = in_lane and in_corr
             toward = -math.copysign(1, u) * du if (u is not None and du is not None and u != 0) else 0.0
             age = t - self.first_seen[d.tid]
+            # how fast the gap shrinks, m/s: danger is a fast approach, not just a small TTC while creeping in a jam
+            closing_speed = dist / ttc if (dist is not None and ttc) else 0.0
             # standing still on the road: we close in on it exactly at our own speed (parked cars at the
             # kerb drift sideways in the frame as we pass them - they must not look like a cut-in)
             static = vehicle and trusted and ego[0] > C.STATIC_MIN_EGO and ttc is not None and dist is not None \
@@ -323,7 +325,8 @@ class BehaviorEngine:
                 t_in = (abs(u) - C.IN_LANE) / toward if toward > 0 else None
                 # dangerous only if we approach it (TTC) or it is already close: at traffic lights the
                 # cross traffic and lane changes far ahead are not a threat
-                closing_in = (ttc is not None and ttc <= C.CUTIN_TTC) or (dist is not None and dist <= C.CRIT_DIST)
+                closing_in = (ttc is not None and ttc <= C.CUTIN_TTC and closing_speed >= C.MIN_CLOSING) \
+                    or (dist is not None and dist <= C.CRIT_DIST)          # a car cutting in right in front of us
                 if vehicle and closing_in and dist <= C.CUTIN_MAX_DIST and toward >= C.CUTIN_MIN_SPEED + slack \
                         and t_in is not None and t_in <= C.CUTIN_HORIZON \
                         and (not turning or (ttc is not None and ttc < C.TTC_CRITICAL)):
@@ -340,9 +343,9 @@ class BehaviorEngine:
                 kind = "ped"
                 # a person matters only if we are driving towards them (their box grows: TTC). People on the
                 # pavement, waiting at a crossing or walking in front of a car that stands still are not a hazard
-                approaching = ttc is not None and ttc <= C.PED_TTC
+                approaching = ttc is not None and ttc <= C.PED_TTC and closing_speed >= C.PED_MIN_CLOSING
                 if in_path and dist <= C.VRU_NEAR and approaching:                  # on our path, we close in
-                    lvl = 3 if ttc < C.TTC_CRITICAL else 2
+                    lvl = 3 if ttc < C.TTC_CRITICAL and dist <= C.PED_RED_DIST else 2
                 elif u is not None and du is not None and not in_lane and toward >= C.VRU_MIN_SPEED \
                         and abs(u) <= C.VRU_STEP_U and age >= C.CUTIN_MIN_AGE:
                     t_in = (abs(u) - C.IN_LANE) / toward
@@ -368,6 +371,7 @@ class BehaviorEngine:
             # pedestrians running in, cars half in our path; cars ahead in our path are handled below
             if ttc is not None and u is not None and ahead and dist is not None and dist <= C.COURSE_MAX_DIST \
                     and ttc <= C.COURSE_TTC and not (vehicle and in_path and not side_view) and not static \
+                    and closing_speed >= (C.MIN_CLOSING if vehicle else C.PED_MIN_CLOSING) \
                     and (whole or not vehicle) \
                     and not found and not (vehicle and turning and ttc >= C.TTC_CRITICAL):
                 u_imp = u + (du or 0.0) * ttc
@@ -377,12 +381,15 @@ class BehaviorEngine:
                         and (moving_in or (not vehicle and (toward >= C.COURSE_MIN_TOWARD or in_path))):
                     kind = "ped" if not vehicle else ("crossing" if side_view else "cutin")
                     crit = ttc < C.CUTIN_CRIT_TTC and dist <= C.CUTIN_CRIT_DIST
-                    lvl = 3 if crit or (not vehicle and ttc < C.TTC_CRITICAL) else 2
+                    lvl = 3 if crit else 2
+                    if not vehicle and dist > C.PED_COURSE_DIST:
+                        lvl = 0                    # far people: their boxes "breathe", TTC from height is unreliable
                     if stopped and not vehicle:
                         lvl = 1
-                    found.append((kind, lvl))
-                    if kind == "ped":
-                        res.peds.append(d)
+                    if lvl:
+                        found.append((kind, lvl))
+                        if kind == "ped":
+                            res.peds.append(d)
             # --- car in our path closing in fast
             if vehicle and in_path and inside and not side_view and ttc is not None and w >= C.TTC_MIN_WIDTH:
                 closing_ms = dist / ttc if dist else 0
@@ -397,8 +404,8 @@ class BehaviorEngine:
                         found.append(("wrongway", 3 if ttc < C.CUTIN_CRIT_TTC else 2))
                     elif d is lead:
                         res.oncoming = True
-                elif ttc < C.TTC_WARNING:
-                    crit = ttc < C.TTC_CRITICAL and w >= C.CRITICAL_MIN_WIDTH
+                elif ttc < C.TTC_WARNING and closing_ms >= C.MIN_CLOSING:
+                    crit = ttc < C.TTC_CRITICAL and w >= C.CRITICAL_MIN_WIDTH and closing_ms >= C.BRAKE_MIN_CLOSING
                     if crit:
                         self.crit_hist.setdefault(d.tid, deque()).append(t)
                     found.append(("ttc", 3) if crit else ("closing", 2))
@@ -411,8 +418,8 @@ class BehaviorEngine:
                 if spin >= C.SKID_ASPECT_RATE and du is not None and abs(du) >= C.SKID_MIN_DU:
                     close = dist <= C.SKID_CRIT_DIST or (ttc is not None and ttc < C.TTC_WARNING)
                     found.append(("skid", 3 if close else 2))
-            if self.dense:
-                found = [(k, 1 if k in ("cutin", "crossing", "drift") and lv < 3 else lv) for k, lv in found]
+            if self.dense:          # a jam: lane nudges one step quieter (red -> yellow, yellow -> green)
+                found = [(k, max(1, lv - 1) if k in ("cutin", "crossing", "drift") else lv) for k, lv in found]
             for kind, level in found:
                 th = Threat(d, kind, level, u, du, ttc, dist, self._predict(h, u, du, yaw))
                 th.feat = self._threat_feat(th, h, t, side_view, in_path, inside, age)
@@ -806,7 +813,8 @@ class BehaviorEngine:
             w, h, w0, h0 = n[3] - n[1], n[4] - n[2], o[3] - o[1], o[4] - o[2]
             cut = min(o[1], n[1]) < C.EDGE_MARGIN or max(o[3], n[3]) > 1 - C.EDGE_MARGIN \
                 or (n[2] + n[4]) / 2 > self.hood
-            if cut or w < C.CRASH_MIN_WIDTH or h <= 0 or h0 <= 0:
+            young = t - self.first_seen.get(tid, t) < C.CRASH_MIN_AGE      # new tracks jump (exposure, occlusion)
+            if cut or young or w < C.CRASH_MIN_WIDTH or h <= 0 or h0 <= 0:
                 continue
             rise = -(((n[2] + n[4]) - (o[2] + o[4])) / 2 - ego) / h / dt       # box heights per second
             taller = math.log((h / w) / (h0 / w0)) / dt

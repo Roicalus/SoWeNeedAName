@@ -31,7 +31,7 @@ export class Advisor {
     const ths = res.threats.filter((th) => th.kind === top.kind);
     const box = ths.length ? ths.reduce((a, b) => (b.level > a.level ? b : a)).det.box : res.lead ? res.lead.box : null;
     Object.assign(adv, { level: top.level, side: this.sideOf(box, W), glow: { 1: 0.35, 2: 0.7, 3: 1 }[top.level] });
-    if (t - (this.lastKind.get(top.kind) ?? -1e9) < C.VOICE_COOLDOWN[top.kind]) return adv;
+    if (C.SILENT_KINDS.includes(top.kind) || t - (this.lastKind.get(top.kind) ?? -1e9) < C.VOICE_COOLDOWN[top.kind]) return adv;
     if (top.level < 3) {
       if (top.level === 1 && !C.SPEAK_GREEN) return adv;
       const last = Math.max(...Object.keys(this.lastLevel).map(Number).filter((lv) => lv >= top.level).map((lv) => this.lastLevel[lv]));

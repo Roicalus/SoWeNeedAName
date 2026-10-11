@@ -55,6 +55,11 @@ TTC_MIN_RATE = 0.05           # growth slower than 5%/s: not closing in
 TTC_MIN_WIDTH = 0.06          # ignore far cars (fraction of frame width)
 TTC_WARNING = 2.5             # fast closing, s
 TTC_CRITICAL = 1.5            # critical closing, s
+MIN_CLOSING = 1.5             # yellow needs the gap to shrink at least this fast, m/s (creeping in a jam is not a risk)
+BRAKE_MIN_CLOSING = 3.0       # red "Brake!" needs at least this closing speed, m/s (~11 km/h)
+PED_RED_DIST = 12.0           # red for a pedestrian only on our path and closer than this, m
+PED_COURSE_DIST = 15.0        # pedestrians on a collision course are judged only closer than this, m
+PED_MIN_CLOSING = 2.5         # a pedestrian alert needs us to drive towards them at least this fast, m/s
 CRITICAL_MIN_WIDTH = 0.12     # "Brake!" only when the car is already close
 TTC_CERTAIN = 1.0             # TTC below this to a close car: red regardless of the risk model
 CERTAIN_HOLD = 0.3            # ...and the critical TTC has held this long (s)
@@ -87,6 +92,7 @@ CRASH_ASPECT = 0.5            # and became taller relative to width (ln(h/w) gro
 CRASH_MAX_SCALE = 0.5         # while the width barely changed (not driving away or approaching)
 CRASH_MIN_WIDTH = 0.06        # small far boxes are too noisy
 CRASH_HOLD = 3.0              # keep the alarm this long after crash signs
+CRASH_MIN_AGE = 1.0           # only tracks seen at least this long (s) can show crash signs
 CRASH_HITS = 2                # crash signs needed in the last 3 analyses of the same car
 CRASH_CRIT_WIDTH = 0.08       # red only for a crash close enough (box wider than this share of the frame), else yellow
 
@@ -159,7 +165,7 @@ VRU_SUDDEN_U = 0.9
 MARK_WINDOW = 30.0            # a car is remembered for its risky manoeuvres this long, s
 MARK_GAP = 2.0                # the same manoeuvre of the same car counts again after this gap, s
 MARK_DIST = 40.0              # warn about a marked car while it is closer than this, m
-MARK_YELLOW = 2.0             # this many episodes (lane change = LANECHANGE_WEIGHT) make it yellow, else green
+MARK_YELLOW = 3.0             # this many episodes (lane change = LANECHANGE_WEIGHT) make it yellow, else green
 LANECHANGE_WEIGHT = 0.34      # three lane changes within MARK_WINDOW = one risky manoeuvre
 LANE_DEEP = 0.25              # a car is "in" a lane when it is within this of the lane centre (boundary jitter is not a change)
 MARK_COUNTS = ("hardbrake", "cutin", "crossing", "weave", "lanechange")   # drift alone does not mark a car
@@ -218,8 +224,9 @@ VOICE_MAX_DELAY = 1.5         # drop a phrase that waited longer: it is no longe
 BEEP = True                   # short chime before the phrase (sounds/beep.wav, beep_crit.wav)
 BEEP_CRIT_LEVEL = 3           # level from which the "critical" chime plays
 # Advisor (advisor.py): budget for non-urgent phrases so the driver does not learn to ignore them
-HINT_GAP = {1: 10.0, 2: 3.0}  # min seconds between two spoken hints of this level (red has no budget)
+HINT_GAP = {1: 20.0, 2: 3.0}  # min seconds between two spoken hints of this level (red has no budget)
 SPEAK_GREEN = True            # speak green "attention" hints (else glow only)
+SILENT_KINDS = ("drift",)     # shown (glow, box) but never spoken
 
 # ---------- event recording ----------
 RECORD_LEVEL = 3              # record a clip from this level

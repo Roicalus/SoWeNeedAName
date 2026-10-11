@@ -1,0 +1,1481 @@
+{
+ "headline": {
+  "recall_y": 0.31805929919137466,
+  "lead_y": 1.085,
+  "false_y_per_min": 1.875188008393852,
+  "ms_per_frame": 57.0
+ },
+ "rows": [
+  {
+   "set": "Crashes (DADA-2000 test)",
+   "n": 371,
+   "recall_y": 0.31805929919137466,
+   "lead_y": 1.085,
+   "recall_r": 0.1967654986522911,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 day",
+   "n": 339,
+   "recall_y": 0.3185840707964602,
+   "lead_y": 1.1,
+   "recall_r": 0.1976401179941003,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 night",
+   "n": 32,
+   "recall_y": 0.3125,
+   "lead_y": 1.0199999999999996,
+   "recall_r": 0.1875,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 rain / snow / fog",
+   "n": 29,
+   "recall_y": 0.1724137931034483,
+   "lead_y": 0.7700000000000005,
+   "recall_r": 0.13793103448275862,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Aggressive-driving clips (social media, test half)",
+   "n": 7,
+   "recall_y": 0.8571428571428571,
+   "lead_y": 1.9500000000000002,
+   "recall_r": 0.8571428571428571,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 crossing",
+   "n": 70,
+   "recall_y": 0.2571428571428571,
+   "lead_y": 1.3999999999999992,
+   "recall_r": 0.12857142857142856,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 cut in",
+   "n": 70,
+   "recall_y": 0.2,
+   "lead_y": 1.0349999999999997,
+   "recall_r": 0.11428571428571428,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 lead stop",
+   "n": 70,
+   "recall_y": 0.4,
+   "lead_y": 1.085,
+   "recall_r": 0.34285714285714286,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 loss",
+   "n": 70,
+   "recall_y": 0.3,
+   "lead_y": 1.2299999999999995,
+   "recall_r": 0.2,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 oncoming",
+   "n": 15,
+   "recall_y": 0.4,
+   "lead_y": 0.585,
+   "recall_r": 0.26666666666666666,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 other",
+   "n": 6,
+   "recall_y": 0.16666666666666666,
+   "lead_y": 5.4,
+   "recall_r": 0.16666666666666666,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Crashes \u00b7 vru",
+   "n": 70,
+   "recall_y": 0.42857142857142855,
+   "lead_y": 1.2000000000000002,
+   "recall_r": 0.18571428571428572,
+   "false_y": null,
+   "false_r": null,
+   "spoken": null
+  },
+  {
+   "set": "Normal driving (BDD100K) \u00b7 46 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 1.875188008393852,
+   "false_r": 0.8067669338438666,
+   "spoken": 2.26766921945303
+  },
+  {
+   "set": "Normal driving \u00b7 day \u00b7 29 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 1.8739889073782952,
+   "false_r": 0.9369944536891476,
+   "spoken": 2.3598378833652607
+  },
+  {
+   "set": "Normal driving \u00b7 night \u00b7 14 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 1.5320083759993288,
+   "false_r": 0.4377166788569511,
+   "spoken": 1.5320083759993288
+  },
+  {
+   "set": "Normal driving \u00b7 dawn/dusk \u00b7 3 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 3.2943675489550386,
+   "false_r": 1.1979518359836505,
+   "spoken": 4.492319384938689
+  },
+  {
+   "set": "Highway in dense traffic (Tehran) \u00b7 5 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 2.0676115881359065,
+   "false_r": 0.620283476440772,
+   "spoken": 2.0676115881359065
+  },
+  {
+   "set": "Highway (VW POV) \u00b7 9 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 0.11384627367802973,
+   "false_r": 0.0,
+   "spoken": 0.11384627367802973
+  },
+  {
+   "set": "Small town + motorway (Austria) \u00b7 4 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 1.9097879817042311,
+   "false_r": 1.6369611271750553,
+   "spoken": 4.0924028179376375
+  },
+  {
+   "set": "Calm city drive (Germany) \u00b7 1 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 0.0,
+   "false_r": 0.0,
+   "spoken": 0.0
+  },
+  {
+   "set": "City with pedestrians (Krak\u00f3w) \u00b7 1 min",
+   "n": null,
+   "recall_y": null,
+   "lead_y": null,
+   "recall_r": null,
+   "false_y": 4.008908685968819,
+   "false_r": 0.0,
+   "spoken": 2.6726057906458798
+  }
+ ],
+ "split": "test",
+ "eval_early_s": 3.0,
+ "per_video": {
+  "01746216-8d8edd01": {
+   "minutes": 0.6664753112033195,
+   "cues": [
+    [
+     10.3,
+     3,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     31.0,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "04db5680-7e29b505": {
+   "minutes": 0.6677241093620547,
+   "cues": [
+    [
+     12.0,
+     1,
+     "Car crossing your path on the right"
+    ],
+    [
+     13.2,
+     2,
+     "Car cutting in on the right"
+    ]
+   ]
+  },
+  "07eabbe1-dc3c5701": {
+   "minutes": 0.6678923841059602,
+   "cues": [
+    [
+     1.9,
+     2,
+     "Car crossing your path on the left"
+    ]
+   ]
+  },
+  "08227ff8-582c6d01": {
+   "minutes": 0.6708922697368421,
+   "cues": [
+    [
+     25.8,
+     1,
+     "Careful, aggressive driver on the left"
+    ]
+   ]
+  },
+  "0840d2ca-449c737e": {
+   "minutes": 0.6676123098201937,
+   "cues": [
+    [
+     17.4,
+     2,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     23.3,
+     2,
+     "Car cutting in on the right"
+    ]
+   ]
+  },
+  "0f062b89-9780bfa6": {
+   "minutes": 0.6710593080724877,
+   "cues": []
+  },
+  "16dce9f0-a914a65e": {
+   "minutes": 0.6676364643945691,
+   "cues": []
+  },
+  "1efa61d1-3136daa2": {
+   "minutes": 0.669945867768595,
+   "cues": [
+    [
+     13.8,
+     2,
+     "Pedestrian on the road on the right"
+    ]
+   ]
+  },
+  "22253622-b6d79307": {
+   "minutes": 0.6676963545981773,
+   "cues": [
+    [
+     6.5,
+     3,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     14.8,
+     3,
+     "Brake!"
+    ],
+    [
+     19.7,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     28.4,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     31.6,
+     3,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     36.2,
+     2,
+     "Pedestrian on the road on the left"
+    ]
+   ]
+  },
+  "23102cfb-b94e3ca0": {
+   "minutes": 0.33356578947368415,
+   "cues": []
+  },
+  "26354f19-e5870011": {
+   "minutes": 0.6682528236914601,
+   "cues": [
+    [
+     14.3,
+     1,
+     "Careful, aggressive driver on the right"
+    ],
+    [
+     34.4,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "2880b229-d27d5285": {
+   "minutes": 0.6672822847682119,
+   "cues": [
+    [
+     35.2,
+     1,
+     "Careful, aggressive driver on the left"
+    ]
+   ]
+  },
+  "2b8380cf-162415de": {
+   "minutes": 0.6687510356255177,
+   "cues": [
+    [
+     9.0,
+     2,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     19.4,
+     2,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     25.0,
+     2,
+     "Pedestrian on the road on the left"
+    ],
+    [
+     29.4,
+     2,
+     "Pedestrian on the road"
+    ]
+   ]
+  },
+  "2c917da8-883da6b6": {
+   "minutes": 0.666892482034273,
+   "cues": []
+  },
+  "32bfe901-8d7d316a": {
+   "minutes": 0.6687496539313399,
+   "cues": [
+    [
+     11.7,
+     2,
+     "Pedestrian on the road on the left"
+    ],
+    [
+     33.5,
+     1,
+     "Careful, aggressive driver on the left"
+    ],
+    [
+     37.4,
+     2,
+     "Pedestrian on the road on the right"
+    ]
+   ]
+  },
+  "32d457ab-c8fb8d60": {
+   "minutes": 0.6671703856749311,
+   "cues": [
+    [
+     29.0,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "3311620c-6ce84fba": {
+   "minutes": 0.6666333612040134,
+   "cues": [
+    [
+     7.3,
+     3,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     15.9,
+     2,
+     "Pedestrian on the road on the left"
+    ],
+    [
+     19.3,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     35.5,
+     3,
+     "Car ahead is braking hard"
+    ]
+   ]
+  },
+  "338304db-0832ecf8": {
+   "minutes": 0.6705046677649643,
+   "cues": [
+    [
+     2.4,
+     2,
+     "Pedestrian on the road on the left"
+    ],
+    [
+     34.2,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "38737842-101b9e43": {
+   "minutes": 0.6681404308202155,
+   "cues": [
+    [
+     1.0,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     1.9,
+     3,
+     "Brake!"
+    ],
+    [
+     2.2,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     7.0,
+     2,
+     "Car crossing your path"
+    ],
+    [
+     15.3,
+     2,
+     "Car crossing your path"
+    ],
+    [
+     37.5,
+     2,
+     "Car cutting in on the left"
+    ]
+   ]
+  },
+  "3c39180d-71d16fe9": {
+   "minutes": 0.6660565723793678,
+   "cues": []
+  },
+  "42981f41-bfcc6a90": {
+   "minutes": 0.6683651778329198,
+   "cues": [
+    [
+     1.2,
+     1,
+     "Car cutting in on the left"
+    ],
+    [
+     26.2,
+     1,
+     "Car cutting in on the left"
+    ]
+   ]
+  },
+  "445c4ab2-57916647": {
+   "minutes": 0.6705019267822736,
+   "cues": [
+    [
+     13.2,
+     2,
+     "Car cutting in on the left"
+    ],
+    [
+     18.3,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     18.8,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     35.8,
+     3,
+     "Oncoming car in your lane!"
+    ]
+   ]
+  },
+  "496ee26b-1667add1": {
+   "minutes": 0.33683029801324504,
+   "cues": []
+  },
+  "4a90bd59-a58ad37d": {
+   "minutes": 0.6685581267217631,
+   "cues": [
+    [
+     13.0,
+     2,
+     "Car crossing your path on the right"
+    ]
+   ]
+  },
+  "4e4f1d23-59cdbbb0": {
+   "minutes": 0.6670271769273434,
+   "cues": [
+    [
+     6.5,
+     1,
+     "Car cutting in"
+    ],
+    [
+     18.8,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     39.9,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "4e9647dc-4eb8944e": {
+   "minutes": 0.6686740924092408,
+   "cues": [
+    [
+     1.6,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     28.4,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "4fe28e80-2d926c1f": {
+   "minutes": 0.6688047717842325,
+   "cues": []
+  },
+  "4ff09088-2257b41b": {
+   "minutes": 0.6711129431162407,
+   "cues": []
+  },
+  "5370d7b1-ea9f415f": {
+   "minutes": 0.6667775006927126,
+   "cues": [
+    [
+     18.8,
+     3,
+     "Oncoming car in your lane!"
+    ],
+    [
+     19.9,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     39.9,
+     1,
+     "Careful, aggressive driver on the right"
+    ]
+   ]
+  },
+  "56188d0a-cf1024ed": {
+   "minutes": 0.6664585088458298,
+   "cues": [
+    [
+     10.8,
+     1,
+     "Careful, aggressive driver on the left"
+    ],
+    [
+     21.2,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "573809a9-61c71300": {
+   "minutes": 0.6675616211745244,
+   "cues": [
+    [
+     13.1,
+     2,
+     "Pedestrian on the road"
+    ],
+    [
+     19.0,
+     2,
+     "Pedestrian on the road"
+    ]
+   ]
+  },
+  "5872965e-cafaee72": {
+   "minutes": 0.6696716171617162,
+   "cues": [
+    [
+     9.9,
+     1,
+     "Car cutting in on the left"
+    ],
+    [
+     18.3,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "5925ca2e-e55b782e": {
+   "minutes": 0.6618623430962344,
+   "cues": []
+  },
+  "60ba25dd-6c0df417": {
+   "minutes": 0.6677814569536424,
+   "cues": [
+    [
+     12.1,
+     1,
+     "Careful, aggressive driver"
+    ],
+    [
+     32.1,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "6485ad0a-bff36754": {
+   "minutes": 0.6670268772513162,
+   "cues": [
+    [
+     0.6,
+     3,
+     "Brake!"
+    ],
+    [
+     1.1,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     10.4,
+     2,
+     "Car ahead is braking hard"
+    ],
+    [
+     12.2,
+     3,
+     "Brake!"
+    ],
+    [
+     15.0,
+     3,
+     "Brake!"
+    ],
+    [
+     17.5,
+     3,
+     "Brake!"
+    ],
+    [
+     20.2,
+     3,
+     "Brake!"
+    ],
+    [
+     34.3,
+     2,
+     "Car ahead is braking hard"
+    ],
+    [
+     35.5,
+     3,
+     "Brake!"
+    ],
+    [
+     38.5,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     38.8,
+     3,
+     "Car ahead is braking hard"
+    ]
+   ]
+  },
+  "64f849cb-55f6ff18": {
+   "minutes": 0.6681959403479703,
+   "cues": [
+    [
+     21.3,
+     1,
+     "Car cutting in"
+    ]
+   ]
+  },
+  "69b08dde-966089f5": {
+   "minutes": 0.6693893951946975,
+   "cues": []
+  },
+  "69cfdd5d-664b39d7": {
+   "minutes": 0.6677001654259719,
+   "cues": [
+    [
+     6.6,
+     1,
+     "Careful, aggressive driver on the right"
+    ]
+   ]
+  },
+  "6c579b9e-29c890e5": {
+   "minutes": 0.6688634297520661,
+   "cues": [
+    [
+     22.1,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "6cf9efaf-a6e0e264": {
+   "minutes": 0.6677278742762613,
+   "cues": [
+    [
+     8.7,
+     3,
+     "Car crossing your path on the right"
+    ],
+    [
+     28.7,
+     1,
+     "Careful, aggressive driver on the right"
+    ]
+   ]
+  },
+  "6d4175f7-648dd8c0": {
+   "minutes": 0.6676406163626313,
+   "cues": [
+    [
+     8.5,
+     2,
+     "Pedestrian on the road on the left"
+    ],
+    [
+     11.6,
+     2,
+     "Car ahead is braking hard"
+    ],
+    [
+     16.7,
+     2,
+     "Pedestrian on the road"
+    ],
+    [
+     19.2,
+     3,
+     "Brake!"
+    ],
+    [
+     31.8,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     32.6,
+     3,
+     "Brake!"
+    ],
+    [
+     38.5,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     39.6,
+     3,
+     "Brake!"
+    ],
+    [
+     40.0,
+     3,
+     "Car ahead is braking hard"
+    ]
+   ]
+  },
+  "6d9e8b77-29397b82": {
+   "minutes": 0.6670576763485477,
+   "cues": []
+  },
+  "6ee715d4-53d11618": {
+   "minutes": 0.6671662503469331,
+   "cues": [
+    [
+     19.0,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "727488c2-8a63df5c": {
+   "minutes": 0.6674188069594035,
+   "cues": [
+    [
+     9.4,
+     1,
+     "Car cutting in on the left"
+    ],
+    [
+     32.1,
+     2,
+     "Car cutting in on the right"
+    ]
+   ]
+  },
+  "786869d5-df7ce5c9": {
+   "minutes": 0.6688684788577705,
+   "cues": [
+    [
+     16.0,
+     1,
+     "Car cutting in on the right"
+    ]
+   ]
+  },
+  "7932814f-395e45c8": {
+   "minutes": 0.6668940397350994,
+   "cues": []
+  },
+  "793b6756-ef820bf7": {
+   "minutes": 0.6705028877887789,
+   "cues": [
+    [
+     11.7,
+     1,
+     "Careful, aggressive driver on the right"
+    ]
+   ]
+  },
+  "797ad2eb-af23ee48": {
+   "minutes": 0.6703937397034597,
+   "cues": [
+    [
+     13.1,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     33.5,
+     1,
+     "Careful, aggressive driver on the left"
+    ]
+   ]
+  },
+  "79f0e729-577fe873": {
+   "minutes": 0.6676130903065453,
+   "cues": [
+    [
+     5.9,
+     2,
+     "Pedestrian on the road on the right"
+    ]
+   ]
+  },
+  "7ae6f498-905fc13e": {
+   "minutes": 0.6686108803986711,
+   "cues": [
+    [
+     32.2,
+     1,
+     "Car cutting in on the right"
+    ],
+    [
+     36.7,
+     2,
+     "Car cutting in on the left"
+    ]
+   ]
+  },
+  "7b2a9ec9-7f4dd1a6": {
+   "minutes": 0.6687876186487995,
+   "cues": [
+    [
+     8.1,
+     2,
+     "Car cutting in on the right"
+    ],
+    [
+     14.5,
+     3,
+     "Brake!"
+    ],
+    [
+     21.2,
+     3,
+     "Car cutting in on the left"
+    ]
+   ]
+  },
+  "83d632ca-d1a0fb0e": {
+   "minutes": 0.6682778239202658,
+   "cues": [
+    [
+     20.1,
+     2,
+     "Pedestrian on the road on the left"
+    ]
+   ]
+  },
+  "848ca3b4-bb8d6f14": {
+   "minutes": 0.6673868948247078,
+   "cues": [
+    [
+     18.5,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     19.5,
+     3,
+     "Brake!"
+    ]
+   ]
+  },
+  "863e94f0-b4e351b9": {
+   "minutes": 0.6660570795234138,
+   "cues": [
+    [
+     13.1,
+     1,
+     "Car cutting in"
+    ],
+    [
+     19.4,
+     2,
+     "Pedestrian on the road on the right"
+    ]
+   ]
+  },
+  "8959b96d-dbfb392a": {
+   "minutes": 0.6670274771024147,
+   "cues": [
+    [
+     4.5,
+     1,
+     "Car cutting in on the left"
+    ],
+    [
+     4.9,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     5.6,
+     3,
+     "Brake!"
+    ],
+    [
+     5.8,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     8.9,
+     2,
+     "Car crossing your path on the right"
+    ],
+    [
+     11.0,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     20.7,
+     2,
+     "Car cutting in on the left"
+    ],
+    [
+     24.7,
+     2,
+     "Car cutting in"
+    ],
+    [
+     27.8,
+     3,
+     "Pedestrian on the road on the right"
+    ]
+   ]
+  },
+  "8b968c79-82942df8": {
+   "minutes": 0.6677814569536424,
+   "cues": [
+    [
+     17.6,
+     1,
+     "Car cutting in"
+    ]
+   ]
+  },
+  "8cb281a4-b7ad4e5f": {
+   "minutes": 0.6671676356589148,
+   "cues": [
+    [
+     2.8,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     10.3,
+     2,
+     "Car crossing your path"
+    ],
+    [
+     30.3,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "8e803264-d6ec9f71": {
+   "minutes": 0.6671847674742412,
+   "cues": [
+    [
+     12.4,
+     3,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     31.2,
+     2,
+     "Car crossing your path"
+    ]
+   ]
+  },
+  "8fc1818a-e5d0e125": {
+   "minutes": 0.6710815397350994,
+   "cues": [
+    [
+     18.5,
+     2,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     30.4,
+     2,
+     "Car cutting in on the left"
+    ]
+   ]
+  },
+  "8fe5f34e-e22d3105": {
+   "minutes": 0.6663383084577114,
+   "cues": [
+    [
+     1.0,
+     2,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     5.6,
+     3,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     9.7,
+     2,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     13.8,
+     2,
+     "Pedestrian on the road"
+    ],
+    [
+     18.7,
+     2,
+     "Pedestrian on the road"
+    ],
+    [
+     26.1,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "91104422-94debf20": {
+   "minutes": 0.6688356749311295,
+   "cues": [
+    [
+     22.7,
+     1,
+     "Careful, aggressive driver on the left"
+    ]
+   ]
+  },
+  "92845c7c-d5a8970d": {
+   "minutes": 0.6680005532503458,
+   "cues": [
+    [
+     19.7,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "93821de4-f08094de": {
+   "minutes": 0.669944582299421,
+   "cues": [
+    [
+     1.5,
+     2,
+     "Car cutting in on the right"
+    ],
+    [
+     8.2,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "94239f91-8aeac8bd": {
+   "minutes": 0.42811354838709675,
+   "cues": [
+    [
+     9.9,
+     2,
+     "Pedestrian on the road on the left"
+    ],
+    [
+     13.9,
+     2,
+     "Pedestrian on the road"
+    ]
+   ]
+  },
+  "9ec96fe5-45b585d8": {
+   "minutes": 0.6688043808734108,
+   "cues": [
+    [
+     18.9,
+     1,
+     "Careful, aggressive driver on the left"
+    ]
+   ]
+  },
+  "a20bcaac-cedaf6fa": {
+   "minutes": 0.6673081122166944,
+   "cues": []
+  },
+  "aa89051b-f32be128": {
+   "minutes": 0.6696696894751305,
+   "cues": [
+    [
+     19.8,
+     2,
+     "Traffic slowing ahead"
+    ]
+   ]
+  },
+  "af483f97-0abcdf91": {
+   "minutes": 0.6671713576158941,
+   "cues": [
+    [
+     13.7,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "austria_slovenia_ccby": {
+   "minutes": 3.6653283333333335,
+   "cues": [
+    [
+     0.9,
+     1,
+     "Car cutting in"
+    ],
+    [
+     11.8,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     18.3,
+     2,
+     "Car ahead is braking hard"
+    ],
+    [
+     20.5,
+     3,
+     "Brake!"
+    ],
+    [
+     22.3,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     23.9,
+     3,
+     "Brake!"
+    ],
+    [
+     26.6,
+     3,
+     "Brake!"
+    ],
+    [
+     27.0,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     42.5,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     43.8,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     67.6,
+     1,
+     "Careful, aggressive driver on the left"
+    ],
+    [
+     97.6,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     98.0,
+     3,
+     "Brake!"
+    ],
+    [
+     98.1,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     107.2,
+     3,
+     "Car ahead is braking hard"
+    ],
+    [
+     115.1,
+     2,
+     "Car cutting in on the left"
+    ],
+    [
+     120.7,
+     2,
+     "Car crossing your path"
+    ]
+   ]
+  },
+  "b00ae1f9-b6c6d12d": {
+   "minutes": 0.6671768259198243,
+   "cues": [
+    [
+     9.5,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "b0a1cc70-b6318f63": {
+   "minutes": 0.6699611204013378,
+   "cues": [
+    [
+     1.0,
+     1,
+     "Car crossing your path on the right"
+    ],
+    [
+     7.5,
+     3,
+     "Pedestrian on the road on the right"
+    ],
+    [
+     11.1,
+     3,
+     "Car ahead is braking hard"
+    ]
+   ]
+  },
+  "krakow_peds": {
+   "minutes": 0.7483333333333333,
+   "cues": [
+    [
+     4.3,
+     2,
+     "Car crossing your path on the left"
+    ],
+    [
+     9.0,
+     2,
+     "Car ahead is braking hard"
+    ],
+    [
+     43.8,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  },
+  "tehran_chamran_ccby": {
+   "minutes": 4.836498333333334,
+   "cues": [
+    [
+     2.2,
+     3,
+     "Crash ahead!"
+    ],
+    [
+     44.6,
+     2,
+     "Car crossing your path on the right"
+    ],
+    [
+     81.8,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     116.9,
+     2,
+     "Car cutting in on the right"
+    ],
+    [
+     127.2,
+     2,
+     "Pedestrian on the road on the left"
+    ],
+    [
+     130.7,
+     2,
+     "Car cutting in on the right"
+    ],
+    [
+     139.0,
+     2,
+     "Traffic slowing ahead"
+    ],
+    [
+     145.0,
+     2,
+     "Car cutting in on the right"
+    ],
+    [
+     180.9,
+     1,
+     "Car cutting in on the right"
+    ],
+    [
+     217.4,
+     2,
+     "Car ahead is braking hard"
+    ],
+    [
+     288.4,
+     3,
+     "Pedestrian on the road on the right"
+    ]
+   ]
+  },
+  "urban": {
+   "minutes": 0.7483333333333333,
+   "cues": []
+  },
+  "us_tesla_crash_pd": {
+   "minutes": 0.48242638888888884,
+   "cues": [
+    [
+     2.3,
+     2,
+     "Car cutting in on the right"
+    ],
+    [
+     15.7,
+     3,
+     "Crash ahead!"
+    ]
+   ]
+  },
+  "vw_highway_ccby": {
+   "minutes": 8.7837745381822,
+   "cues": [
+    [
+     88.1,
+     2,
+     "Car cutting in"
+    ],
+    [
+     183.0,
+     1,
+     "Careful, aggressive driver"
+    ]
+   ]
+  }
+ },
+ "detector": [
+  {
+   "model": "COCO weights (before)",
+   "day_vehicle": 0.6943944830861009,
+   "night_vehicle": 0.5439876985883556,
+   "day_person": 0.5772318787196581,
+   "night_person": 0.4665053399121317
+  },
+  {
+   "model": "fine-tuned on BDD100K (ours)",
+   "day_vehicle": 0.8187519029739229,
+   "night_vehicle": 0.7721747690035574,
+   "day_person": 0.665202664839859,
+   "night_person": 0.6000550040157872
+  }
+ ]
+}

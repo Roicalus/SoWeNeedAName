@@ -61,7 +61,7 @@ class Advisor:
         box = max(ths, key=lambda th: th.level).det.box if ths else (res.lead.box if res.lead else None)
         adv.level, adv.side = top.level, side_of(box, W)
         adv.glow = {1: 0.35, 2: 0.7, 3: 1.0}[top.level]
-        if t - self.last_kind.get(top.kind, -1e9) < C.VOICE_COOLDOWN[top.kind]:
+        if top.kind in C.SILENT_KINDS or t - self.last_kind.get(top.kind, -1e9) < C.VOICE_COOLDOWN[top.kind]:
             return adv
         if top.level < 3:
             if top.level == 1 and not C.SPEAK_GREEN:

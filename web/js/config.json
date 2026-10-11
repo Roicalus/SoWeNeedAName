@@ -96,6 +96,7 @@
  "BRAKE_LIGHTS": false,
  "BRAKE_MAX_DIST": 25.0,
  "BRAKE_MAX_TTC": 3.0,
+ "BRAKE_MIN_CLOSING": 3.0,
  "BRAKE_RATE": 0.2,
  "BRAKE_RED_JUMP": 2.0,
  "BRAKE_RED_MIN": 0.03,
@@ -143,6 +144,7 @@
  "CRASH_HITS": 2,
  "CRASH_HOLD": 3.0,
  "CRASH_MAX_SCALE": 0.5,
+ "CRASH_MIN_AGE": 1.0,
  "CRASH_MIN_WIDTH": 0.06,
  "CRASH_RISE": 0.7,
  "CRASH_WINDOW": 0.4,
@@ -171,7 +173,7 @@
  "EVENTS_DIR": "events",
  "EVENT_GAP": 1.5,
  "HINT_GAP": {
-  "1": 10.0,
+  "1": 20.0,
   "2": 3.0
  },
  "HISTORY_SEC": 5.5,
@@ -239,7 +241,8 @@
  "MARK_DIST": 40.0,
  "MARK_GAP": 2.0,
  "MARK_WINDOW": 30.0,
- "MARK_YELLOW": 2.0,
+ "MARK_YELLOW": 3.0,
+ "MIN_CLOSING": 1.5,
  "MODEL": "models/yolo11m_bdd.onnx",
  "MODEL_FALLBACK": "models/yolo11s_fp32.onnx",
  "NMS_IOU": 0.45,
@@ -250,6 +253,9 @@
  ],
  "ORT_THREADS": 4,
  "PATH_CORRIDOR_FRAC": 0.55,
+ "PED_COURSE_DIST": 15.0,
+ "PED_MIN_CLOSING": 2.5,
+ "PED_RED_DIST": 12.0,
  "PED_TTC": 3.5,
  "PED_XWALK_ALERT": false,
  "PERSON_CLASS": 0,
@@ -262,6 +268,9 @@
  "RISK_CONFIRM": 0.2,
  "RISK_MODEL": "models/risk.json",
  "SIDE_MARGIN": 0.04,
+ "SILENT_KINDS": [
+  "drift"
+ ],
  "SKID": false,
  "SKID_ASPECT_RATE": 0.6,
  "SKID_CRIT_DIST": 25.0,
@@ -340,13 +349,13 @@
  "ADVISOR": {
   "AHEAD_DX": 0.15,
   "SIDED": [
-   "vru_near",
-   "drift",
-   "ped_xwalk",
-   "aggressive",
-   "crossing",
    "cutin",
-   "ped"
+   "ped",
+   "drift",
+   "crossing",
+   "aggressive",
+   "ped_xwalk",
+   "vru_near"
   ],
   "SIDE_WORDS": {
    "left": "on the left",
