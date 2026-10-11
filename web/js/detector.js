@@ -15,7 +15,7 @@ export class Detector {
   async load(url, size) {
     this.size = size;
     this.canvas.width = this.canvas.height = size;
-    ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/";
+    ort.env.wasm.wasmPaths = globalThis.ORT_BASE || "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/";
     ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
     const tries = "gpu" in navigator ? ["webgpu", "wasm"] : ["wasm"];
     for (const ep of tries) {

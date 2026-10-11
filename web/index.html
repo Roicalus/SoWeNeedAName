@@ -12,7 +12,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css?v=3" />
   <script>try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.min.js"></script>
+  <!-- onnxruntime-web: local copy (tools/get_ort.py, works offline) or the CDN -->
+  <script src="vendor/ort/ort.webgpu.min.js"></script>
+  <script>
+    window.ORT_BASE = window.ort ? new URL("vendor/ort/", location.href).href : "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/";
+    if (!window.ort) document.write('<script src="' + window.ORT_BASE + 'ort.webgpu.min.js"><\/script>');
+  </script>
 </head>
 <body>
   <header class="top">

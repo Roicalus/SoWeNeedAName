@@ -141,9 +141,11 @@ In the browser the lighter YOLO11n runs on WebGPU/WASM; phones get a 320 px inpu
 No personal data is collected: frames are processed and dropped on the device.
 
 ## Run it
-**Web (what the jury tests):** any static server over `web/`, e.g. `python -m http.server 8099 -d web`, then
-http://localhost:8099 (the camera needs HTTPS or localhost). GitHub Pages deploys `web/` on every push to
-`main` (`.github/workflows/pages.yml`).
+**Web (what the jury tests), locally:** double-click `start_site.bat` (or `python serve.py`) - it serves `web/`
+on http://localhost:8099 and opens the browser; only the Python standard library is needed. The camera and
+WebGPU work on localhost. For a fully offline demo run `python tools/get_ort.py` once: the page then takes
+onnxruntime-web from `web/vendor/ort` instead of the CDN. GitHub Pages deploys the same `web/` on every push
+to `main` (`.github/workflows/pages.yml`).
 
 **Desktop app and evaluation (Python 3.10–3.12):**
 ```bash
