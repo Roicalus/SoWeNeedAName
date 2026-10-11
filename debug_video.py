@@ -248,8 +248,11 @@ def run(path, analyzer, args):
         k = args.width / frame.shape[1]
         frame = cv2.resize(frame, (args.width, round(frame.shape[0] * k)), interpolation=cv2.INTER_AREA)
         if args.demo:
-            scaled = _scaled(res, k)
-            ui.draw(frame, scaled, advice=advice)
+            # what the driver gets: the coloured glow and the warning, nothing else - no boxes, distances or lane
+            s = args.width / 1280
+            ui.draw_glow(frame, advice.side, advice.level, advice.glow)
+            if res.top:
+                ui._label(frame, res.top.screen, (int(40 * s), int(80 * s)), 1.5 * s, ui.COLORS[res.level], max(2, int(3 * s)))
             cue = sound.playing(t)
             if cue:
                 ui._text(frame, f'"{cue["phrase"]}"', (int(40 * args.width / 1280), frame.shape[0] - int(70 * args.width / 1280)),
