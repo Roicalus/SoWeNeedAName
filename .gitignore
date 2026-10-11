@@ -35,3 +35,5 @@ cache_teh/
 cache_final/
 .claude/
 debug/
+cache_local/
+data/videos/

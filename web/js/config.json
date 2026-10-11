@@ -142,12 +142,17 @@
  "CRASH_ASPECT": 0.5,
  "CRASH_BOTTOM_RISE": 0.25,
  "CRASH_CRIT_WIDTH": 0.08,
+ "CRASH_GONE": 0.15,
  "CRASH_HITS": 2,
  "CRASH_HOLD": 3.0,
  "CRASH_MAX_SCALE": 0.5,
  "CRASH_MIN_AGE": 1.0,
  "CRASH_MIN_WIDTH": 0.06,
  "CRASH_RISE": 0.7,
+ "CRASH_STRETCH_LAG": 0.3,
+ "CRASH_STRETCH_RISE": 0.35,
+ "CRASH_VANISH": true,
+ "CRASH_VANISH_SEC": 0.6,
  "CRASH_WINDOW": 0.4,
  "CRITICAL_MIN_WIDTH": 0.12,
  "CRIT_DIST": 10.0,
@@ -350,13 +355,13 @@
  "ADVISOR": {
   "AHEAD_DX": 0.15,
   "SIDED": [
-   "drift",
    "vru_near",
+   "aggressive",
    "crossing",
+   "ped_xwalk",
    "ped",
    "cutin",
-   "ped_xwalk",
-   "aggressive"
+   "drift"
   ],
   "SIDE_WORDS": {
    "left": "on the left",

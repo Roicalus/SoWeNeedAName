@@ -82,15 +82,20 @@ function fillResults(R) {
 async function init() {
   C = await (await fetch("js/config.json")).json();
   const params = new URLSearchParams(location.search);
-  const phone = /(Android|iPhone|iPad)/i.test(navigator.userAgent);
-  const size = Number(params.get("size") || (phone ? 320 : 416));
-  const model = params.get("model") || (phone ? C.WEB_MODEL_PHONE : C.WEB_MODEL);
-  detector = new Detector(C);
   xwalk = new Crosswalk();
   try {
-    const backend = await detector.load(`models/${model}_${size}.onnx`, size);
-    $("status").textContent = `Model ready · ${backend.toUpperCase()} · ${size} px`;
-    $("backend").textContent = `${backend} · ${size} px`;
+    let model, size;
+    if (params.get("model") || params.get("size")) {                  // forced: ?model=yolo11n&size=320
+      model = params.get("model") || C.WEB_MODEL_PHONE;
+      size = Number(params.get("size") || 416);
+      detector = new Detector(C);
+      await detector.load(`models/${model}_${size}.onnx`, size);
+    } else {
+      [detector, model, size] = await pickDetector();
+    }
+    const backend = detector.backend;
+    $("status").textContent = `Model ready · ${model} · ${backend.toUpperCase()} · ${size} px`;
+    $("backend").textContent = `${model} · ${backend} · ${size} px`;
   } catch (e) {
     $("status").textContent = "This browser could not start the model: " + e.message;
     return;
@@ -102,6 +107,42 @@ async function init() {
   for (const m of ["driver", "system"]) $(`mode-${m}`).addEventListener("click", () => setMode(m));
   $("stage").addEventListener("dblclick", () => { if (video.src) { $("intro").hidden = !$("intro").hidden; } });
   requestAnimationFrame(render);
+}
+
+// The rules need ~8-10 analyses a second: braking and cut-ins are measured from how fast boxes grow and move,
+// and at 4 a second a hard stop is over before it is seen. So the model is picked by measured speed: start
+// with the small COCO model (10 MB), time it, and take our BDD100K-tuned model only if the device can run it
+// in budget (it is ~2.1x slower); on a very slow device drop to 320 px.
+const FRAME_BUDGET_MS = 110;
+const BIG_MODEL_COST = 2.1;
+
+async function timeDetector(d) {
+  const probe = document.createElement("canvas");
+  probe.width = 1280; probe.height = 720;
+  probe.getContext("2d").fillRect(0, 0, 64, 64);
+  await d.detect(probe, 1280, 720);
+  const t0 = performance.now();
+  for (let i = 0; i < 4; i++) await d.detect(probe, 1280, 720);
+  return (performance.now() - t0) / 4;
+}
+
+async function pickDetector() {
+  $("status").textContent = "Loading the model…";
+  let d = new Detector(C);
+  await d.load(`models/${C.WEB_MODEL_PHONE}_416.onnx`, 416);
+  const ms = await timeDetector(d);
+  if (ms * BIG_MODEL_COST <= FRAME_BUDGET_MS) {
+    $("status").textContent = "Fast device: loading the BDD100K model (80 MB)…";
+    try {
+      const big = new Detector(C);
+      await big.load(`models/${C.WEB_MODEL}_416.onnx`, 416);
+      return [big, C.WEB_MODEL, 416];
+    } catch (e) { console.warn("[detector] big model failed, keeping the small one", e); }
+  }
+  if (ms <= FRAME_BUDGET_MS) return [d, C.WEB_MODEL_PHONE, 416];
+  d = new Detector(C);
+  await d.load(`models/${C.WEB_MODEL_PHONE}_320.onnx`, 320);
+  return [d, C.WEB_MODEL_PHONE, 320];
 }
 
 function setMode(m) {

@@ -92,7 +92,12 @@ CRASH_ASPECT = 0.5            # and became taller relative to width (ln(h/w) gro
 CRASH_MAX_SCALE = 0.5         # while the width barely changed (not driving away or approaching)
 CRASH_BOTTOM_RISE = 0.25      # and the box bottom left the road too (box heights per second); a box that only
                               # stretches upward is the detector merging shadow or glare, not a lifted car
-CRASH_MIN_WIDTH = 0.06        # small far boxes are too noisy
+CRASH_VANISH = True           # a car whose box shot up (bottom in place) and then vanished mid-frame: tumbling
+CRASH_STRETCH_RISE = 0.35     # "shot up": rose this fast (box heights/s) while getting taller (CRASH_ASPECT)
+CRASH_VANISH_SEC = 0.6        # ...and was lost within this time after it
+CRASH_GONE = 0.15             # lost for at least this long (s), with no other box in its place
+CRASH_STRETCH_LAG = 0.3       # the shoot-up was seen at most this long before the car was lost
+CRASH_MIN_WIDTH = 0.06       # small far boxes are too noisy
 CRASH_HOLD = 3.0              # keep the alarm this long after crash signs
 CRASH_MIN_AGE = 1.0           # only tracks seen at least this long (s) can show crash signs
 CRASH_HITS = 2                # crash signs needed in the last 3 analyses of the same car

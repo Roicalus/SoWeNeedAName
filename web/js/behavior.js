@@ -18,6 +18,14 @@ function percentile(xs, q) {
   return i + 1 >= a.length ? a[i] : a[i] + (a[i + 1] - a[i]) * (pos - i);
 }
 const EPS = 1e-6;
+function iou(a, b) {
+  const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])), iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const inter = ix * iy;
+  return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter + 1e-9);
+}
+// Points needed for a growth / lateral-speed fit. The desktop app analyses ~10 times a second (4+ points in the
+// 0.6 s window); a browser on a weak device manages 4-5, which leaves exactly 3 - still enough for a line.
+const MIN_PTS = 3;
 
 export class BehaviorEngine {
   constructor(C) {
@@ -27,6 +35,7 @@ export class BehaviorEngine {
     this.hist = new Map();      // tid -> [[t, x1, y1, x2, y2, u]] (fractions)
     this.cls = new Map(); this.lastSeen = new Map(); this.firstSeen = new Map(); this.rates = new Map(); this.critHist = new Map();
     this.since = new Map(); this.lastRaw = new Map(); this.crashAt = new Map();
+    this.stretchAt = new Map(); this.crashGhost = new Map();   // tid -> [t, box] box shot up; tid -> last box of a vanished car
     this.yawQ = []; this.bottoms = [];
     this.top = C.CORRIDOR_TOP_Y; this.hood = C.HOOD_Y;
     this.xwalk = { box: null, seen: -1e9, recent: [] };
@@ -127,7 +136,7 @@ export class BehaviorEngine {
       const sideView = (x2 - x1) * aspect > C.CROSS_MIN_ASPECT * (y2 - y1);
       const dist = this.distance(d.cls, x2 - x1, y2 - y1, aspect, sideView);
       const ttc = this.ttc(h, t, sideView || !vehicle);
-      const du = this.latSpeed(h, t, yaw, vehicle, aspect);
+      const du = this.latSpeed(h, t, yaw, vehicle, aspect, d.cls);
       const inside = x1 > C.EDGE_MARGIN && x2 < 1 - C.EDGE_MARGIN, ahead = by >= this.top;
       const whole = x1 > C.SIDE_MARGIN && x2 < 1 - C.SIDE_MARGIN;
       const inCorr = Math.abs((x1 + x2) / 2 - C.CORRIDOR_CENTER_X) <= this.half(by) * C.PATH_CORRIDOR_FRAC;
@@ -199,10 +208,15 @@ export class BehaviorEngine {
     }
 
     for (const tid of this.crashes(t)) this.crashAt.set(tid, t);
-    for (const [k, v] of [...this.crashAt]) if (t - v > C.CRASH_HOLD) this.crashAt.delete(k);
+    if (C.CRASH_VANISH) for (const [tid, b] of this.vanished(t, live)) {
+      this.crashAt.set(tid, t);
+      this.crashGhost.set(tid, { box: [b[1] * W, b[2] * H, b[3] * W, b[4] * H], cls: this.cls.get(tid), tid });
+    }
+    for (const [k, v] of [...this.crashAt]) if (t - v > C.CRASH_HOLD) { this.crashAt.delete(k); this.crashGhost.delete(k); }
     if (this.crashAt.size) {
       raw.add("crash");
       res.crashed = live.filter((d) => this.crashAt.has(d.tid));
+      for (const [k, g] of this.crashGhost) if (!live.some((d) => d.tid === k)) res.crashed.push(g);   // vanished: last box
       for (const d of res.crashed) threats.push({ det: d, kind: "crash", level: d.box[2] - d.box[0] >= C.CRASH_CRIT_WIDTH * W ? 3 : 2 });
     }
 
@@ -315,18 +329,31 @@ export class BehaviorEngine {
     return mean(this.yawQ.map((p) => p[1]));
   }
 
-  latSpeed(h, t, yaw, vehicle, aspect) {
+  latSpeed(h, t, yaw, vehicle, aspect, cls = 2) {
     const C = this.C, pts = h.filter((p) => t - p[0] <= C.KIN_WINDOW && p[5] !== null);
-    if (pts.length < 4 || pts.at(-1)[0] - pts[0][0] < C.KIN_MIN_SPAN) return null;
+    if (pts.length < MIN_PTS || pts.at(-1)[0] - pts[0][0] < C.KIN_MIN_SPAN) return null;
     const ts = pts.map((p) => p[0]);
     if (!vehicle) {
       const hh = pts.at(-1)[4] - pts.at(-1)[2];
       return polyfit1(ts, pts.map((p) => p[5]))[0] - yaw * aspect / Math.max(hh, 1e-6) * C.PERSON_HEIGHT_M / C.LANE_WIDTH_M;
     }
     const cx = pts.map((p) => (p[1] + p[3]) / 2), w = pts.map((p) => p[3] - p[1]);
-    const dcx = polyfit1(ts, cx)[0], g = polyfit1(ts, w.map(Math.log))[0];
-    const X = (cx.at(-1) - C.CORRIDOR_CENTER_X) / w.at(-1);
-    return ((dcx - yaw) / w.at(-1) - X * g) * C.VEHICLE_WIDTH_M / C.LANE_WIDTH_M;
+    const [, x1, y1, x2, y2] = pts.at(-1);
+    if ((x2 - x1) * aspect > C.CROSS_MIN_ASPECT * (y2 - y1)) {
+      // seen from the side (crossing): box centre and width - the box spans the car's length
+      const dcx = polyfit1(ts, cx)[0], g = polyfit1(ts, w.map(Math.log))[0];
+      const X = (cx.at(-1) - C.CORRIDOR_CENTER_X) / w.at(-1);
+      return ((dcx - yaw) / w.at(-1) - X * g) * C.VEHICLE_WIDTH_M / C.LANE_WIDTH_M;
+    }
+    // seen from behind: the OUTER box edge scaled by the box HEIGHT. A car parked at the kerb shows more of its
+    // near side as we approach, so its box grows towards our lane and the centre "slides" in; the outer edge
+    // stays on its rear corner and the rear height does not depend on the visible side (see behavior.py)
+    const right = cx.at(-1) >= C.CORRIDOR_CENTER_X;
+    const edge = pts.map((p) => (right ? p[3] : p[1])), hh = pts.map((p) => Math.max((p[4] - p[2]) / aspect, 1e-6));
+    const dedge = polyfit1(ts, edge)[0], g = polyfit1(ts, hh.map(Math.log))[0];
+    const X = (edge.at(-1) - C.CORRIDOR_CENTER_X) / hh.at(-1);
+    const realH = cls === 5 || cls === 7 ? C.TRUCK_HEIGHT_M : C.CAR_HEIGHT_M;
+    return ((dedge - yaw) / hh.at(-1) - X * g) * realH / C.LANE_WIDTH_M;
   }
 
   steadyU(h, t, span, limit) {
@@ -342,7 +369,7 @@ export class BehaviorEngine {
 
   rate(h, t, byHeight) {
     const C = this.C, pts = h.filter((p) => t - p[0] <= C.TTC_WINDOW);
-    if (pts.length < 4 || pts.at(-1)[0] - pts[0][0] < C.TTC_MIN_SPAN) return null;
+    if (pts.length < MIN_PTS || pts.at(-1)[0] - pts[0][0] < C.TTC_MIN_SPAN) return null;
     const ts = pts.map((p) => p[0]), ws = pts.map((p) => Math.max(byHeight ? p[4] - p[2] : p[3] - p[1], 1e-6));
     return { rate: polyfit1(ts, ws.map(Math.log))[0], ts, ws };
   }
@@ -402,6 +429,23 @@ export class BehaviorEngine {
       const taller = Math.log((h / w) / (h0 / w0)) / dt, scale = Math.log(w / w0) / dt;
       if (rise >= C.CRASH_RISE && taller >= C.CRASH_ASPECT && Math.abs(scale) < C.CRASH_MAX_SCALE
           && bottom >= C.CRASH_BOTTOM_RISE) out.push(tid);
+      // box shot up with its bottom in place: a car tipping nose-up, or shadow merged into the box - see vanished()
+      else if (rise >= C.CRASH_STRETCH_RISE && taller >= C.CRASH_ASPECT && Math.abs(scale) < C.CRASH_MAX_SCALE) this.stretchAt.set(tid, [t, n]);
+    }
+    return out;
+  }
+  // A car whose box just shot up and then disappeared mid-frame with nothing in its place is tumbling (the
+  // detector does not recognise a rolling car); a shadow-merged box stays tracked. Returns [[tid, last box]].
+  vanished(t, live) {
+    const C = this.C, out = [];
+    for (const [tid, [ts, box]] of [...this.stretchAt]) {
+      const seen = this.lastSeen.get(tid) ?? -1;
+      if (t - ts > C.CRASH_VANISH_SEC) this.stretchAt.delete(tid);
+      else if (seen < t && seen - ts <= C.CRASH_STRETCH_LAG && t - seen >= C.CRASH_GONE) {
+        this.stretchAt.delete(tid);
+        const replaced = live.some((d) => this.vehicle.has(d.cls) && iou(box.slice(1, 5), this.hist.get(d.tid).at(-1).slice(1, 5)) > 0.3);
+        if (!replaced) out.push([tid, box]);
+      }
     }
     return out;
   }

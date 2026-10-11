@@ -151,6 +151,14 @@ def focal():
     return 0.5 / math.tan(math.radians(C.CAMERA_HFOV_DEG) / 2)
 
 
+def _iou(a, b):
+    """Overlap of two boxes (x1, y1, x2, y2)."""
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter + 1e-9)
+
+
 class BehaviorEngine:
     def __init__(self):
         # track id -> [(t, x1, y1, x2, y2, u)]: box as frame fractions and lateral position in lanes
@@ -174,6 +182,8 @@ class BehaviorEngine:
         self.crash_rise = 0.0
         self.crit_hist = {}                 # track id -> times of critical TTC (for "physically certain")
         self.crash_hits = {}                # track id -> crash signs in the last analyses
+        self.stretch_at = {}                # track id -> (t, box) when its box last shot up with the bottom in place
+        self.crash_ghost = {}               # track id -> last Detection of a car that vanished in a crash
         self.marks = defaultdict(list)      # track id -> [(t, kind)] risky manoeuvres this car made
         self.lane_idx = {}                  # track id -> (lane index, since) for counting its lane changes
         self.prev_active = set()            # alert kinds confirmed on the previous step
@@ -264,7 +274,7 @@ class BehaviorEngine:
             # TTC from width (more precise for a car seen from behind) or from height (independent of
             # turning - for side views and people); for people it tells whether we approach them
             ttc = self._ttc(h, t, by_height=side_view or not vehicle)
-            du = self._lat_speed(h, t, yaw, lanes_ok, vehicle, aspect)
+            du = self._lat_speed(h, t, yaw, lanes_ok, vehicle, aspect, d.cls)
             inside = x1 > C.EDGE_MARGIN and x2 < 1 - C.EDGE_MARGIN
             whole = x1 > C.SIDE_MARGIN and x2 < 1 - C.SIDE_MARGIN     # fully in view: cut boxes give wrong geometry
             ahead = by >= self.top
@@ -435,10 +445,17 @@ class BehaviorEngine:
             if sum(q) >= C.CRASH_HITS:         # crash signs in 2 of the last 3 analyses: not a single box jump
                 self.crash_at[tid] = t
         self.crash_hits = {k: q for k, q in self.crash_hits.items() if any(q)}
+        if C.CRASH_VANISH:
+            for tid, box in self._vanished(t, live):
+                self.crash_at[tid] = t
+                self.crash_ghost[tid] = Detection((box[1] * W, box[2] * H, box[3] * W, box[4] * H), self.cls[tid], tid)
         self.crash_at = {k: v for k, v in self.crash_at.items() if t - v <= C.CRASH_HOLD}
+        self.crash_ghost = {k: v for k, v in self.crash_ghost.items() if k in self.crash_at}
         if self.crash_at:
             raw.add("crash")
             res.crashed = [d for d in live if d.tid in self.crash_at]
+            # a vanished (tumbling) car: shown at its last box
+            res.crashed += [g for k, g in self.crash_ghost.items() if not any(d.tid == k for d in live)]
             threats += [Threat(d, "crash", 3 if d.box[2] - d.box[0] >= C.CRASH_CRIT_WIDTH * W else 2,
                                None, None, None, None) for d in res.crashed]
 
@@ -705,7 +722,7 @@ class BehaviorEngine:
             self.yaw.popleft()
         return float(np.mean([v for _, v in self.yaw]))
 
-    def _lat_speed(self, h, t, yaw, lanes_ok, vehicle, aspect):
+    def _lat_speed(self, h, t, yaw, lanes_ok, vehicle, aspect, cls=2):
         """du/dt, lanes/s. From markings - directly (they turn in the frame together with the cars);
         without markings - from the box shift minus own turning and perspective spreading."""
         pts = [p for p in h if t - p[0] <= C.KIN_WINDOW and p[5] is not None]
@@ -718,13 +735,28 @@ class BehaviorEngine:
         if not vehicle:      # person: u from height; own turning shifts them by yaw / box height
             hh = pts[-1][4] - pts[-1][2]
             return float(np.polyfit(ts, u, 1)[0] - yaw * aspect / max(hh, 1e-6) * C.PERSON_HEIGHT_M / C.LANE_WIDTH_M)
-        # X = (cx - c) / w;  dX/dt = (dcx/dt - yaw) / w - X * dln(w)/dt  (a car with a constant lateral
+        # X = (x - c) / s;  dX/dt = (dx/dt - yaw) / s - X * dln(s)/dt  (a car with a constant lateral
         # offset that comes closer has dX/dt = 0 - its box drifts sideways only because of perspective)
-        dcx = np.polyfit(ts, cx, 1)[0]
-        g = np.polyfit(ts, np.log(w), 1)[0]
-        X = (cx[-1] - C.CORRIDOR_CENTER_X) / w[-1]
-        dX = (dcx - yaw) / w[-1] - X * g
-        return float(dX * C.VEHICLE_WIDTH_M / C.LANE_WIDTH_M)
+        x1, y1, x2, y2 = pts[-1][1:5]
+        if (x2 - x1) * aspect > C.CROSS_MIN_ASPECT * (y2 - y1):
+            # seen from the side (crossing): the box centre and width, as the box spans the car's length
+            dcx = np.polyfit(ts, cx, 1)[0]
+            g = np.polyfit(ts, np.log(w), 1)[0]
+            X = (cx[-1] - C.CORRIDOR_CENTER_X) / w[-1]
+            return float(((dcx - yaw) / w[-1] - X * g) * C.VEHICLE_WIDTH_M / C.LANE_WIDTH_M)
+        # seen from behind: the OUTER edge of the box (far side from our lane) scaled by the box HEIGHT. As we
+        # approach a car parked at the kerb its near side comes into view, the box grows towards our lane and
+        # its centre "slides" in - but the outer edge stays on its rear corner, and the height of the rear does
+        # not depend on how much side is visible. A car really cutting in moves its outer edge too.
+        hh = np.array([(p[4] - p[2]) / aspect for p in pts])             # box height in frame widths
+        right = cx[-1] >= C.CORRIDOR_CENTER_X
+        edge = np.array([p[3] if right else p[1] for p in pts])
+        dedge = np.polyfit(ts, edge, 1)[0]
+        g = np.polyfit(ts, np.log(np.maximum(hh, 1e-6)), 1)[0]
+        X = (edge[-1] - C.CORRIDOR_CENTER_X) / max(hh[-1], 1e-6)
+        dX = (dedge - yaw) / max(hh[-1], 1e-6) - X * g
+        real_h = C.TRUCK_HEIGHT_M if cls in (5, 7) else C.CAR_HEIGHT_M
+        return float(dX * real_h / C.LANE_WIDTH_M)
 
     def _predict(self, h, u, du, yaw):
         """Where the box will shift in PREDICT_SEC (for the on-screen arrow), frame fractions."""
@@ -825,6 +857,27 @@ class BehaviorEngine:
             if rise >= C.CRASH_RISE and taller >= C.CRASH_ASPECT and abs(scale) < C.CRASH_MAX_SCALE \
                     and bottom >= C.CRASH_BOTTOM_RISE:
                 out.append(tid)
+            elif rise >= C.CRASH_STRETCH_RISE and taller >= C.CRASH_ASPECT and abs(scale) < C.CRASH_MAX_SCALE:
+                # the box shot up but its bottom stayed: a car tipping nose-up - or the detector merging a car
+                # with shadow above it. Decided by what follows: see _vanished
+                self.stretch_at[tid] = (t, n)
+        return out
+
+    def _vanished(self, t, live):
+        """A car whose box just shot up and then disappeared mid-frame, with nothing in its place: it is
+        tumbling (a rolling car is not recognised by the detector). A shadow-merged box stays tracked."""
+        out = []
+        for tid, (ts, box) in list(self.stretch_at.items()):
+            seen = self.last_seen.get(tid, -1.0)
+            if t - ts > C.CRASH_VANISH_SEC:
+                del self.stretch_at[tid]
+            elif seen < t and seen - ts <= C.CRASH_STRETCH_LAG and t - seen >= C.CRASH_GONE:
+                del self.stretch_at[tid]
+                _, x1, y1, x2, y2 = box[:5]
+                replaced = any(_iou((x1, y1, x2, y2), self.hist[d.tid][-1][1:5]) > 0.3
+                               for d in live if d.cls in C.VEHICLE_CLASSES)
+                if not replaced:
+                    out.append((tid, box))
         return out
 
     # ---------- brake lights (experimental) ----------

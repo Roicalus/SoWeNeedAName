@@ -147,6 +147,12 @@ WebGPU work on localhost. For a fully offline demo run `python tools/get_ort.py`
 onnxruntime-web from `web/vendor/ort` instead of the CDN. GitHub Pages deploys the same `web/` on every push
 to `main` (`.github/workflows/pages.yml`).
 
+**Live demo speed:** the rules measure braking and cut-ins from how fast boxes grow and move, so they need
+~8-10 analyses a second. The page times the small model on the device first and loads our BDD100K model
+(~2x slower) only if it still fits a 110 ms budget; on slow laptops it stays on YOLO11n at 416 or 320 px.
+Force a model with `?model=yolo11m_bdd&size=416`. The browser logic also fits growth on 3 points instead of 4,
+so a 4-5 analyses/s device still sees hard braking (checked on the crash samples at 4-10 analyses/s).
+
 **GitHub Pages setup:** Settings → Pages → Source: **GitHub Actions** (then the workflow publishes `web/` at the
 site root). If the source is "Deploy from a branch" instead, the root `index.html` redirects to `web/` and
 `.nojekyll` stops Jekyll from rendering the README in place of the site.

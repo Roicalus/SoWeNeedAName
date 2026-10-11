@@ -210,6 +210,41 @@ def test_car_driving_away_not_crash():
     assert not seen(run(frames), "crash")
 
 
+def test_parked_car_side_coming_into_view_not_cut_in():
+    """We drive past a car parked at the kerb (2.8 m to the right). Its near side comes into view, so the box
+    grows towards our lane and its centre slides in - the rear corner stays put: no cut-in, no drift."""
+    from behavior import focal
+    f, asp, X, L = focal(), W / H, 2.8, 4.5
+    frames = []
+    for i in range(57):
+        z = 25 - 10 * i / FPS                                   # we drive at 10 m/s
+        x1 = 0.5 + f * (X - 0.9) / (z + L)                      # front-left corner: the side is visible
+        x2 = 0.5 + f * (X + 0.9) / z                            # rear-right corner
+        y2 = 0.45 + f * asp * 1.3 / z                           # rear bottom (camera 1.3 m high)
+        y1 = 0.45 - f * asp * 0.2 / z                           # rear top (car 1.5 m high)
+        frames.append([Detection((x1 * W, y1 * H, x2 * W, y2 * H), 2, 9),
+                       car(0.2, 0.05, tid=5, bottom=0.55), car(0.45, 0.04, tid=6, bottom=0.52)])
+    out = run(frames)
+    assert not any(seen(out, k) for k in ("cutin", "crossing", "drift")), "a parked car we pass is not a cut-in"
+
+
+def test_car_tipping_up_and_vanishing_is_crash():
+    """TeslaCam: the car ahead hits something, its nose shoots up (box top jumps, bottom stays on the road),
+    then it tumbles and the detector loses it. Lost right after shooting up = crash."""
+    frames = []
+    for i in range(70):
+        k = max(0, i - 45) / FPS
+        w, x1, y2 = 0.10 * W, 0.45 * W, 0.62 * H
+        h = 0.8 * w * (1 + 3.0 * k)
+        dets = [car(0.25, 0.05, tid=8, bottom=0.58), car(0.8, 0.05, tid=9, bottom=0.57)]
+        if i < 54:                                   # tipping for 0.3 s, then lost
+            dets.append(Detection((x1, y2 - h, x1 + w, y2), 2, 7))
+        frames.append(dets)
+    out = run(frames)
+    assert not seen(out[:45], "crash"), "no crash before it happens"
+    assert seen(out[54:], "crash"), "a car that shot up and vanished is a crash"
+
+
 def test_cut_in_detected():
     """A car from the next lane (2 widths offset, ~9 m ahead) moves in front of us within a second."""
     frames = []

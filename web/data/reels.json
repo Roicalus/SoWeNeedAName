@@ -1,8 +1,18 @@
 [
   {
+    "id": "highway",
+    "title": "Highway · car ahead loses control",
+    "caption": "TeslaCam (public domain).",
+    "poster": "renders/highway.jpg",
+    "views": {
+      "driver": "renders/highway_driver.mp4",
+      "system": "renders/highway_system.mp4"
+    }
+  },
+  {
     "id": "crash",
     "title": "Car ahead brakes · crash",
-    "caption": "DADA-2000 crash clip: \"Car ahead is braking hard\" is spoken at 6.1 s and the screen turns red at 6.2 s, about 1.4 s before the impact.",
+    "caption": "DADA-2000.",
     "poster": "renders/crash.jpg",
     "views": {
       "driver": "renders/crash_driver.mp4",
@@ -12,20 +22,11 @@
   {
     "id": "krakow",
     "title": "City · dense traffic",
-    "caption": "Kraków, 45 s with trams and pedestrians (CC BY 3.0). Spoken: a car crossing our path at 4.3 s, hard braking ahead at 9.0 s, cut-ins at 32.0 and 37.4 s. Parked cars and people on the pavement stay silent.",
+    "caption": "Kraków (CC BY 3.0).",
     "poster": "renders/krakow.jpg",
     "views": {
       "driver": "renders/krakow_driver.mp4",
       "system": "renders/krakow_system.mp4"
-    }
-  },
-  {
-    "id": "urban",
-    "title": "Calm city drive",
-    "caption": "German city, 25 s (CC0): nothing dangerous happens, so the assistant stays silent.",
-    "poster": "renders/urban.jpg",
-    "views": {
-      "driver": "renders/urban_driver.mp4"
     }
   }
 ]
